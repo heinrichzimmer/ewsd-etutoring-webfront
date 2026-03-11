@@ -26,7 +26,7 @@ const navItems = [
     { href: "/staff/students", label: "Student List", icon: Users },
     { href: "/staff/meetings", label: "Schedule Meeting", icon: CalendarDays },
     { href: "/staff/files", label: "Uploaded Files", icon: Upload },
-    { href: "/staff/allocations", label: "Allocate/ Reallocate", icon: Shuffle },
+    { href: "/staff/allocate", label: "Allocate/ Reallocate", icon: Shuffle },
     { href: "/staff/blogs", label: "Blogs", icon: BookOpen },
 ];
 

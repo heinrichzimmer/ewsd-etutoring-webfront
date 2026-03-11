@@ -1,32 +1,27 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-export async function GET(req: Request) {
-    const token = (await cookies()).get("access_token")?.value;
+async function safeJson(res: Response) {
+    const text = await res.text();
+    try { return JSON.parse(text); } catch { return { raw: text }; }
+}
+
+export async function GET() {
+    const cookieStore = await cookies();
+    const token = cookieStore.get("access_token")?.value;
     if (!token) return NextResponse.json({ message: "Unauthenticated" }, { status: 401 });
 
-    const BACKEND = process.env.BACKEND_URL;
-    if (!BACKEND) return NextResponse.json({ message: "BACKEND_URL is not set" }, { status: 500 });
+    const BACKEND = process.env.BACKEND_URL!;
+    const res = await fetch(`${BACKEND}/api/v1/users`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+    });
 
-    const url = new URL(req.url);
-    const page = url.searchParams.get("page") ?? "0";
-    const size = url.searchParams.get("size") ?? "100";
+    const data = await safeJson(res);
+    if (!res.ok) return NextResponse.json(data, { status: res.status });
 
-    try {
-        const res = await fetch(`${BACKEND}/api/admin/users/tutors?page=${page}&size=${size}`, {
-            headers: { Authorization: `Bearer ${token}` },
-            cache: "no-store",
-        });
+    const list = Array.isArray(data) ? data : data?.content ?? [];
+    const tutors = list.filter((u: any) => u.role === "TUTOR");
 
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) return NextResponse.json(data, { status: res.status });
-
-        // backend returns paged object with "content"
-        return NextResponse.json(data.content ?? []);
-    } catch (e: any) {
-        return NextResponse.json(
-            { message: `Cannot reach backend (${BACKEND}). Is Docker running?` },
-            { status: 502 }
-        );
-    }
+    return NextResponse.json(tutors);
 }

@@ -21,6 +21,12 @@ export async function POST(req: Request) {
     // backend returns accessToken (AuthResponse)
     const out = NextResponse.json(data);
 
+    out.cookies.set("sessionRole", data.role === "ADMIN" ? "staff" : "user", {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+    });
+
     out.cookies.set("access_token", data.accessToken, {
         httpOnly: true,
         sameSite: "lax",

@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 
 import {
     Dialog,
@@ -49,11 +50,20 @@ type Allocation = {
     studentUserId: string;
     tutorUserId: string;
     allocatedById: string;
-    allocatedDate: string; // dd/MM/yyyy HH:mm (UTC) in responses
+    allocatedDate: string;
     endedDate: string | null;
     reason: string | null;
-    scheduleStart: string; // dd/MM/yyyy HH:mm (UTC) in list response
+    scheduleStart: string;
     scheduleEnd: string;
+};
+
+type PreviewItem = {
+    studentUserId: string;
+    tutorUserId: string;
+    reason?: string | null;
+    scheduleStart: string;
+    scheduleEnd: string;
+    [key: string]: any;
 };
 
 function fullName(u: User) {
@@ -61,9 +71,20 @@ function fullName(u: User) {
 }
 
 function toIsoFromDatetimeLocal(value: string) {
-    // value example: "2026-03-10T09:00"
-    // Convert to ISO-8601 string (UTC)
     return new Date(value).toISOString();
+}
+
+function formatPreviewDateTime(value: string) {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+
+    return d.toLocaleString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
 }
 
 export default function AllocatePage() {
@@ -87,9 +108,14 @@ export default function AllocatePage() {
     // Bulk dialog
     const [bulkOpen, setBulkOpen] = useState(false);
     const [bulkTutorId, setBulkTutorId] = useState("");
-    const [bulkStart, setBulkStart] = useState("");
-    const [bulkEnd, setBulkEnd] = useState("");
     const [bulkReason, setBulkReason] = useState("");
+    const [bulkDate, setBulkDate] = useState("");
+    const [bulkStartTime, setBulkStartTime] = useState("");
+    const [bulkSlotDurationMinutes, setBulkSlotDurationMinutes] = useState<number>(60);
+    const [bulkTimeZoneId, setBulkTimeZoneId] = useState("Asia/Yangon");
+
+    const [previewLoading, setPreviewLoading] = useState(false);
+    const [previewItems, setPreviewItems] = useState<PreviewItem[]>([]);
 
     const tutorById = useMemo(() => {
         const m = new Map<string, User>();
@@ -103,13 +129,10 @@ export default function AllocatePage() {
         return m;
     }, [students]);
 
-    // For Sprint 1: show “current” allocation per student as the most recently allocatedDate
     const allocationByStudentId = useMemo(() => {
         const m = new Map<string, Allocation>();
         for (const a of allocations) {
-            const prev = m.get(a.studentUserId);
-            if (!prev) m.set(a.studentUserId, a);
-            else m.set(a.studentUserId, a); // backend list is active; usually newest last/first — good enough for sprint
+            m.set(a.studentUserId, a);
         }
         return m;
     }, [allocations]);
@@ -117,6 +140,7 @@ export default function AllocatePage() {
     async function fetchData() {
         setLoading(true);
         setError(null);
+
         try {
             const [tRes, sRes, aRes] = await Promise.all([
                 fetch("/api/staff/tutors"),
@@ -132,12 +156,13 @@ export default function AllocatePage() {
             if (!sRes.ok) throw new Error(sData?.message ?? "Failed to load students");
             if (!aRes.ok) throw new Error(aData?.message ?? "Failed to load allocations");
 
-            // Our proxy routes should return arrays for tutors/students; allocations returns { content: [...] }
             setTutors(Array.isArray(tData) ? tData : tData?.content ?? []);
             setStudents(Array.isArray(sData) ? sData : sData?.content ?? []);
             setAllocations(aData?.content ?? []);
         } catch (e: any) {
-            setError(e?.message ?? "Something went wrong");
+            const msg = e?.message ?? "Something went wrong";
+            setError(msg);
+            toast.error(msg);
         } finally {
             setLoading(false);
         }
@@ -180,6 +205,7 @@ export default function AllocatePage() {
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.message ?? "Allocation failed");
+        return data;
     }
 
     async function updateAllocation(id: string, payload: {
@@ -197,20 +223,37 @@ export default function AllocatePage() {
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.message ?? "Reallocation failed");
+        return data;
     }
 
     async function undoAllocation(id: string) {
-        const res = await fetch(`/api/staff/allocations/${id}/undo`, { method: "POST" });
+        const res = await fetch(`/api/staff/allocations/${id}/undo`, {
+            method: "POST",
+        });
+
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.message ?? "Undo failed");
+        return data;
+    }
+
+    async function readError(res: Response) {
+        const data = await res.json().catch(() => ({}));
+        return data?.message || data?.raw || "Something went wrong";
     }
 
     async function onSingleConfirm() {
         if (!singleStudentId) return;
         setError(null);
 
-        if (!singleTutorId) return setError("Please select a tutor.");
-        if (!singleStart || !singleEnd) return setError("Please select schedule start & end.");
+        if (!singleTutorId) {
+            toast.error("Please select a tutor.");
+            return;
+        }
+
+        if (!singleStart || !singleEnd) {
+            toast.error("Please select schedule start and end.");
+            return;
+        }
 
         const scheduleStart = toIsoFromDatetimeLocal(singleStart);
         const scheduleEnd = toIsoFromDatetimeLocal(singleEnd);
@@ -219,13 +262,13 @@ export default function AllocatePage() {
             const existing = allocationByStudentId.get(singleStudentId);
 
             if (existing) {
-                // Reallocate via PUT (backend supports update of tutor/schedule/reason) :contentReference[oaicite:3]{index=3}
                 await updateAllocation(existing.id, {
                     tutorUserId: singleTutorId,
                     reason: singleReason || undefined,
                     scheduleStart,
                     scheduleEnd,
                 });
+                toast.success("Allocation updated successfully.");
             } else {
                 await createAllocation({
                     studentUserId: singleStudentId,
@@ -234,50 +277,103 @@ export default function AllocatePage() {
                     scheduleStart,
                     scheduleEnd,
                 });
+                toast.success("Allocation created successfully.");
             }
 
             setSingleOpen(false);
             await fetchData();
         } catch (e: any) {
-            setError(e?.message ?? "Allocation failed");
+            const msg = e?.message ?? "Allocation failed";
+            setError(msg);
+            toast.error(msg);
         }
     }
 
-    async function onBulkConfirm() {
-        setError(null);
+    async function onBulkPreview() {
+        const studentUserIds = Array.from(selectedIds);
 
-        const ids = Array.from(selectedIds);
-        if (!ids.length) return setError("Please select at least 1 student.");
-        if (!bulkTutorId) return setError("Please select a tutor.");
-        if (!bulkStart || !bulkEnd) return setError("Please select schedule start & end.");
+        if (!studentUserIds.length) return toast.error("Select at least 1 student.");
+        if (!bulkTutorId) return toast.error("Select a tutor.");
+        if (!bulkDate) return toast.error("Select a date.");
+        if (!bulkSlotDurationMinutes || bulkSlotDurationMinutes <= 0) {
+            return toast.error("Slot duration must be greater than 0.");
+        }
+        if (!bulkTimeZoneId) return toast.error("Time zone is required.");
 
-        const scheduleStart = toIsoFromDatetimeLocal(bulkStart);
-        const scheduleEnd = toIsoFromDatetimeLocal(bulkEnd);
+        setPreviewLoading(true);
 
         try {
-            // Backend bulk shape: { items: [...] } max 500 :contentReference[oaicite:4]{index=4}
+            const res = await fetch("/api/staff/allocations/preview", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    date: bulkDate,
+                    startTime: bulkStartTime ? bulkStartTime : null,
+                    slotDurationMinutes: bulkSlotDurationMinutes,
+                    tutorUserId: bulkTutorId,
+                    studentUserIds,
+                    reason: bulkReason || null,
+                    timeZoneId: bulkTimeZoneId,
+                }),
+            });
+
+            if (!res.ok) {
+                toast.error(await readError(res));
+                return;
+            }
+
+            const data = await res.json().catch(() => ({}));
+            const items: PreviewItem[] = Array.isArray(data)
+                ? data
+                : (data.items ?? data.content ?? []);
+
+            if (!items.length) {
+                toast.error("Preview returned no slots. Try different date/time.");
+                return;
+            }
+
+            setPreviewItems(items);
+            toast.success("Preview generated. Review and confirm.");
+        } catch {
+            toast.error("Network error while generating preview.");
+        } finally {
+            setPreviewLoading(false);
+        }
+    }
+
+    async function onBulkConfirmFromPreview() {
+        if (!previewItems.length) {
+            toast.error("Please preview first.");
+            return;
+        }
+
+        try {
             const res = await fetch("/api/staff/allocations/bulk", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    items: ids.map((studentUserId) => ({
-                        studentUserId,
-                        tutorUserId: bulkTutorId,
-                        reason: bulkReason || undefined,
-                        scheduleStart,
-                        scheduleEnd,
+                    items: previewItems.map((p) => ({
+                        studentUserId: p.studentUserId,
+                        tutorUserId: p.tutorUserId ?? bulkTutorId,
+                        reason: (p.reason ?? bulkReason) || null,
+                        scheduleStart: p.scheduleStart,
+                        scheduleEnd: p.scheduleEnd,
                     })),
                 }),
             });
 
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data?.message ?? "Bulk allocation failed");
+            if (!res.ok) {
+                toast.error(await readError(res));
+                return;
+            }
 
+            toast.success("Bulk allocation completed.");
             setBulkOpen(false);
             setSelectedIds(new Set());
+            setPreviewItems([]);
             await fetchData();
-        } catch (e: any) {
-            setError(e?.message ?? "Bulk allocation failed");
+        } catch {
+            toast.error("Network error while creating bulk allocation.");
         }
     }
 
@@ -346,7 +442,6 @@ export default function AllocatePage() {
                                                 <TableCell>{idx + 1}</TableCell>
                                                 <TableCell className="font-medium">{fullName(s)}</TableCell>
                                                 <TableCell>{s.email}</TableCell>
-
                                                 <TableCell>{tutor ? fullName(tutor) : "-"}</TableCell>
 
                                                 <TableCell className="text-xs text-muted-foreground">
@@ -381,9 +476,12 @@ export default function AllocatePage() {
                                                                 setError(null);
                                                                 try {
                                                                     await undoAllocation(allocation.id);
+                                                                    toast.success("Allocation ended successfully.");
                                                                     await fetchData();
                                                                 } catch (e: any) {
-                                                                    setError(e?.message ?? "Undo failed");
+                                                                    const msg = e?.message ?? "Undo failed";
+                                                                    setError(msg);
+                                                                    toast.error(msg);
                                                                 }
                                                             }}
                                                         >
@@ -401,7 +499,6 @@ export default function AllocatePage() {
                 </CardContent>
             </Card>
 
-            {/* Single Assign/Reassign */}
             <Dialog open={singleOpen} onOpenChange={setSingleOpen}>
                 <DialogContent>
                     <DialogHeader>
@@ -412,7 +509,9 @@ export default function AllocatePage() {
                         <div className="text-sm text-muted-foreground">
                             Student:{" "}
                             <span className="font-medium text-foreground">
-                {singleStudentId ? fullName(studentById.get(singleStudentId)!) : "-"}
+                {singleStudentId && studentById.get(singleStudentId)
+                    ? fullName(studentById.get(singleStudentId)!)
+                    : "-"}
               </span>
                         </div>
 
@@ -435,17 +534,30 @@ export default function AllocatePage() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-2">
                                 <div className="text-sm font-medium">Schedule Start</div>
-                                <Input type="datetime-local" value={singleStart} onChange={(e) => setSingleStart(e.target.value)} />
+                                <Input
+                                    type="datetime-local"
+                                    value={singleStart}
+                                    onChange={(e) => setSingleStart(e.target.value)}
+                                />
                             </div>
+
                             <div className="space-y-2">
                                 <div className="text-sm font-medium">Schedule End</div>
-                                <Input type="datetime-local" value={singleEnd} onChange={(e) => setSingleEnd(e.target.value)} />
+                                <Input
+                                    type="datetime-local"
+                                    value={singleEnd}
+                                    onChange={(e) => setSingleEnd(e.target.value)}
+                                />
                             </div>
                         </div>
 
                         <div className="space-y-2">
                             <div className="text-sm font-medium">Reason (optional)</div>
-                            <Input value={singleReason} onChange={(e) => setSingleReason(e.target.value)} placeholder="e.g., Math support" />
+                            <Input
+                                value={singleReason}
+                                onChange={(e) => setSingleReason(e.target.value)}
+                                placeholder="e.g., Math support"
+                            />
                         </div>
 
                         <p className="text-xs text-muted-foreground">
@@ -462,11 +574,16 @@ export default function AllocatePage() {
                 </DialogContent>
             </Dialog>
 
-            {/* Bulk Assign */}
-            <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
-                <DialogContent>
+            <Dialog
+                open={bulkOpen}
+                onOpenChange={(open) => {
+                    setBulkOpen(open);
+                    if (!open) setPreviewItems([]);
+                }}
+            >
+                <DialogContent className="max-w-3xl">
                     <DialogHeader>
-                        <DialogTitle>Bulk Assign Students</DialogTitle>
+                        <DialogTitle>Bulk Assign Students (Preview → Confirm)</DialogTitle>
                     </DialogHeader>
 
                     <div className="space-y-3">
@@ -476,7 +593,13 @@ export default function AllocatePage() {
 
                         <div className="space-y-2">
                             <div className="text-sm font-medium">Select Tutor</div>
-                            <Select value={bulkTutorId} onValueChange={setBulkTutorId}>
+                            <Select
+                                value={bulkTutorId}
+                                onValueChange={(v) => {
+                                    setBulkTutorId(v);
+                                    setPreviewItems([]);
+                                }}
+                            >
                                 <SelectTrigger>
                                     <SelectValue placeholder="Choose a tutor" />
                                 </SelectTrigger>
@@ -492,30 +615,128 @@ export default function AllocatePage() {
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-2">
-                                <div className="text-sm font-medium">Schedule Start</div>
-                                <Input type="datetime-local" value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} />
+                                <div className="text-sm font-medium">Date</div>
+                                <Input
+                                    type="date"
+                                    value={bulkDate}
+                                    onChange={(e) => {
+                                        setBulkDate(e.target.value);
+                                        setPreviewItems([]);
+                                    }}
+                                />
                             </div>
+
                             <div className="space-y-2">
-                                <div className="text-sm font-medium">Schedule End</div>
-                                <Input type="datetime-local" value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} />
+                                <div className="text-sm font-medium">Start Time (optional)</div>
+                                <Input
+                                    type="time"
+                                    value={bulkStartTime}
+                                    onChange={(e) => {
+                                        setBulkStartTime(e.target.value);
+                                        setPreviewItems([]);
+                                    }}
+                                />
+                            </div>
+
+                            <div className="space-y-2">
+                                <div className="text-sm font-medium">Slot Duration (minutes)</div>
+                                <Input
+                                    type="number"
+                                    min={15}
+                                    step={15}
+                                    value={bulkSlotDurationMinutes}
+                                    onChange={(e) => {
+                                        setBulkSlotDurationMinutes(Number(e.target.value));
+                                        setPreviewItems([]);
+                                    }}
+                                />
+                            </div>
+
+                            <div className="space-y-2">
+                                <div className="text-sm font-medium">Time Zone</div>
+                                <Input
+                                    value={bulkTimeZoneId}
+                                    onChange={(e) => {
+                                        setBulkTimeZoneId(e.target.value);
+                                        setPreviewItems([]);
+                                    }}
+                                />
+                                <div className="text-xs text-muted-foreground">Example: Asia/Yangon</div>
                             </div>
                         </div>
 
                         <div className="space-y-2">
                             <div className="text-sm font-medium">Reason (optional)</div>
-                            <Input value={bulkReason} onChange={(e) => setBulkReason(e.target.value)} placeholder="e.g., Support session" />
+                            <Input
+                                value={bulkReason}
+                                onChange={(e) => {
+                                    setBulkReason(e.target.value);
+                                    setPreviewItems([]);
+                                }}
+                                placeholder="e.g., Math support"
+                            />
                         </div>
 
-                        <p className="text-xs text-muted-foreground">
-                            Bulk supports up to 500 items per request.
-                        </p>
+                        {previewItems.length > 0 && (
+                            <>
+                                <div className="text-sm font-medium">Preview Result</div>
+
+                                <div className="rounded-lg border bg-white overflow-auto max-h-[260px]">
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>Student</TableHead>
+                                                <TableHead>Schedule Start</TableHead>
+                                                <TableHead>Schedule End</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+
+                                        <TableBody>
+                                            {previewItems.map((p, idx) => {
+                                                const student = studentById.get(p.studentUserId);
+
+                                                return (
+                                                    <TableRow key={idx}>
+                                                        <TableCell className="font-medium">
+                                                            <div className="flex flex-col">
+                                                                <span>{student ? fullName(student) : p.studentUserId}</span>
+                                                                {student?.email && (
+                                                                    <span className="text-xs text-muted-foreground">
+                                    {student.email}
+                                  </span>
+                                                                )}
+                                                            </div>
+                                                        </TableCell>
+
+                                                        <TableCell className="text-sm">
+                                                            {formatPreviewDateTime(p.scheduleStart)}
+                                                        </TableCell>
+
+                                                        <TableCell className="text-sm">
+                                                            {formatPreviewDateTime(p.scheduleEnd)}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                );
+                                            })}
+                                        </TableBody>
+                                    </Table>
+                                </div>
+                            </>
+                        )}
                     </div>
 
                     <DialogFooter className="gap-2">
                         <Button variant="secondary" onClick={() => setBulkOpen(false)}>
                             Cancel
                         </Button>
-                        <Button onClick={onBulkConfirm}>Confirm Bulk Assign</Button>
+
+                        <Button variant="secondary" onClick={onBulkPreview} disabled={previewLoading}>
+                            {previewLoading ? "Previewing..." : "Preview Slots"}
+                        </Button>
+
+                        <Button onClick={onBulkConfirmFromPreview} disabled={!previewItems.length}>
+                            Confirm Bulk Allocate
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

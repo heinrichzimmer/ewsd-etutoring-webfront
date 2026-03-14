@@ -36,13 +36,16 @@ export default function LoginPage() {
                 return;
             }
 
-            // staff = ADMIN in backend
-            if (data?.role !== "ADMIN") {
-                setError("Only staff (ADMIN) can access the staff dashboard.");
+
+
+            if (data?.role === "ADMIN") {
+                router.push("/staff");
+            } else if (data?.role === "TUTOR") {
+                router.push("/tutor");
+            } else {
+                setError("This account does not have dashboard access.");
                 return;
             }
-
-            router.push("/staff");
             router.refresh();
         } catch {
             setError("Network error. Please try again.");

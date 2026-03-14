@@ -25,15 +25,15 @@ export async function POST(req: Request) {
 
     const out = NextResponse.json(data);
 
-    // ✅ store jwt for API proxy routes
+    // store jwt for API proxy routes
     out.cookies.set("access_token", data.accessToken, {
         httpOnly: true,
         sameSite: "lax",
         path: "/",
     });
 
-    // ✅ make your existing middleware work (staff dashboard access)
-    out.cookies.set("sessionRole", data.role === "ADMIN" ? "staff" : "user", {
+    // make your existing middleware work (staff dashboard access)
+    out.cookies.set("sessionRole", data.role === "ADMIN" ? "staff" : data.role === "TUTOR" ? "tutor" : "user", {
         httpOnly: true,
         sameSite: "lax",
         path: "/",

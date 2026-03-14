@@ -4,13 +4,17 @@ import type { NextRequest } from "next/server";
 export function middleware(req: NextRequest) {
     const { pathname } = req.nextUrl;
 
-    // Only protect staff dashboard routes
-    if (pathname.startsWith("/staff")) {
-        const role = req.cookies.get("sessionRole")?.value;
-        const token = req.cookies.get("access_token")?.value;
+    const token = req.cookies.get("access_token")?.value;
+    const role = req.cookies.get("sessionRole")?.value;
 
-        // Require login + staff role
+    if (pathname.startsWith("/staff")) {
         if (!token || role !== "staff") {
+            return NextResponse.redirect(new URL("/login", req.url));
+        }
+    }
+
+    if (pathname.startsWith("/tutor")) {
+        if (!token) {
             return NextResponse.redirect(new URL("/login", req.url));
         }
     }
@@ -19,5 +23,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-    matcher: ["/staff/:path*"],
+    matcher: ["/staff/:path*", "/tutor/:path*"],
 };

@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+    Suspense,
+    useEffect,
+    useMemo,
+    useState,
+    type FormEvent,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
@@ -29,18 +35,46 @@ function fullName(u: Student) {
 
 function isoToLocalInput(iso?: string | null) {
     if (!iso) return "";
+
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "";
+
     const pad = (n: number) => String(n).padStart(2, "0");
+
     const yyyy = d.getFullYear();
     const mm = pad(d.getMonth() + 1);
     const dd = pad(d.getDate());
     const hh = pad(d.getHours());
     const mi = pad(d.getMinutes());
+
     return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
 }
 
-export default function TutorMeetingCreatePage() {
+function MeetingCreatePageFallback() {
+    return (
+        <div className="mx-auto max-w-4xl space-y-6">
+            <div>
+                <h1 className="text-2xl font-semibold">Schedule New Meeting</h1>
+                <p className="mt-1 text-sm text-muted-foreground">
+                    Loading meeting form...
+                </p>
+            </div>
+
+            <Card className="shadow-sm">
+                <CardHeader>
+                    <CardTitle className="text-lg">Create Meeting</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <div className="py-6 text-sm text-muted-foreground">
+                        Please wait...
+                    </div>
+                </CardContent>
+            </Card>
+        </div>
+    );
+}
+
+function TutorMeetingCreatePageContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const meetingId = searchParams.get("id");
@@ -52,7 +86,7 @@ export default function TutorMeetingCreatePage() {
     const [startDate, setStartDate] = useState("");
     const [endDate, setEndDate] = useState("");
     const [mode, setMode] = useState<"VIRTUAL" | "IN_PERSON">("VIRTUAL");
-    const [location, setLocation] = useState("");
+    const [location, setLocation] = useState("Online");
     const [link, setLink] = useState("");
     const [description, setDescription] = useState("");
 
@@ -60,35 +94,43 @@ export default function TutorMeetingCreatePage() {
 
     useEffect(() => {
         async function loadStudents() {
-            const res = await fetch("/api/tutor/allocated-students");
-            const data = await res.json().catch(() => ({}));
+            try {
+                const res = await fetch("/api/tutor/allocated-students");
+                const data = await res.json().catch(() => ({}));
 
-            if (!res.ok) {
-                toast.error(data?.message ?? "Failed to load allocated students");
-                return;
+                if (!res.ok) {
+                    toast.error(data?.message ?? "Failed to load allocated students");
+                    return;
+                }
+
+                setStudents(Array.isArray(data) ? data : data?.content ?? []);
+            } catch {
+                toast.error("Failed to load allocated students");
             }
-
-            setStudents(Array.isArray(data) ? data : data?.content ?? []);
         }
 
         async function loadMeeting() {
             if (!meetingId) return;
 
-            const res = await fetch(`/api/tutor/meetings/${meetingId}`);
-            const data = await res.json().catch(() => ({}));
+            try {
+                const res = await fetch(`/api/tutor/meetings/${meetingId}`);
+                const data = await res.json().catch(() => ({}));
 
-            if (!res.ok) {
-                toast.error(data?.message ?? "Failed to load meeting");
-                return;
+                if (!res.ok) {
+                    toast.error(data?.message ?? "Failed to load meeting");
+                    return;
+                }
+
+                setStudentUserId(data.studentUserId ?? "");
+                setStartDate(isoToLocalInput(data.startDate));
+                setEndDate(isoToLocalInput(data.endDate));
+                setMode(data.mode ?? "VIRTUAL");
+                setLocation(data.location ?? (data.mode === "IN_PERSON" ? "" : "Online"));
+                setLink(data.link ?? "");
+                setDescription(data.description ?? "");
+            } catch {
+                toast.error("Failed to load meeting");
             }
-
-            setStudentUserId(data.studentUserId ?? "");
-            setStartDate(isoToLocalInput(data.startDate));
-            setEndDate(isoToLocalInput(data.endDate));
-            setMode(data.mode ?? "VIRTUAL");
-            setLocation(data.location ?? "");
-            setLink(data.link ?? "");
-            setDescription(data.description ?? "");
         }
 
         loadStudents();
@@ -98,18 +140,38 @@ export default function TutorMeetingCreatePage() {
     useEffect(() => {
         if (mode === "IN_PERSON") {
             setLink("");
-        } else if (mode === "VIRTUAL" && !location) {
-            setLocation("Online");
+            if (location === "Online") {
+                setLocation("");
+            }
+        } else {
+            if (!location) {
+                setLocation("Online");
+            }
         }
     }, [mode, location]);
 
-    async function onSubmit(e: React.FormEvent) {
+    async function onSubmit(e: FormEvent<HTMLFormElement>) {
         e.preventDefault();
 
-        if (!studentUserId) return toast.error("Please select a student.");
-        if (!startDate || !endDate) return toast.error("Please select start and end date.");
-        if (mode === "VIRTUAL" && !link) return toast.error("Meeting link is required for virtual meetings.");
-        if (mode === "IN_PERSON" && !location) return toast.error("Location is required for in-person meetings.");
+        if (!studentUserId) {
+            toast.error("Please select a student.");
+            return;
+        }
+
+        if (!startDate || !endDate) {
+            toast.error("Please select start and end date.");
+            return;
+        }
+
+        if (mode === "VIRTUAL" && !link) {
+            toast.error("Meeting link is required for virtual meetings.");
+            return;
+        }
+
+        if (mode === "IN_PERSON" && !location) {
+            toast.error("Location is required for in-person meetings.");
+            return;
+        }
 
         setLoading(true);
 
@@ -143,6 +205,8 @@ export default function TutorMeetingCreatePage() {
             toast.success(isEdit ? "Meeting updated." : "Meeting created.");
             router.push("/tutor/meetings");
             router.refresh();
+        } catch {
+            toast.error("Something went wrong while saving the meeting.");
         } finally {
             setLoading(false);
         }
@@ -187,7 +251,12 @@ export default function TutorMeetingCreatePage() {
 
                             <div className="space-y-2">
                                 <label className="text-sm font-medium">Mode</label>
-                                <Select value={mode} onValueChange={(v) => setMode(v as "VIRTUAL" | "IN_PERSON")}>
+                                <Select
+                                    value={mode}
+                                    onValueChange={(v) =>
+                                        setMode(v as "VIRTUAL" | "IN_PERSON")
+                                    }
+                                >
                                     <SelectTrigger className="w-full">
                                         <SelectValue />
                                     </SelectTrigger>
@@ -203,12 +272,16 @@ export default function TutorMeetingCreatePage() {
                                 <Input
                                     value={location}
                                     onChange={(e) => setLocation(e.target.value)}
-                                    placeholder={mode === "IN_PERSON" ? "Enter location" : "Online"}
+                                    placeholder={
+                                        mode === "IN_PERSON" ? "Enter location" : "Online"
+                                    }
                                 />
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Start Date & Time</label>
+                                <label className="text-sm font-medium">
+                                    Start Date & Time
+                                </label>
                                 <Input
                                     type="datetime-local"
                                     value={startDate}
@@ -217,7 +290,9 @@ export default function TutorMeetingCreatePage() {
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">End Date & Time</label>
+                                <label className="text-sm font-medium">
+                                    End Date & Time
+                                </label>
                                 <Input
                                     type="datetime-local"
                                     value={endDate}
@@ -241,22 +316,32 @@ export default function TutorMeetingCreatePage() {
                             </div>
 
                             <div className="space-y-2 md:col-span-2">
-                                <label className="text-sm font-medium">Notes / Description</label>
+                                <label className="text-sm font-medium">
+                                    Notes / Description
+                                </label>
                                 <textarea
                                     value={description}
                                     onChange={(e) => setDescription(e.target.value)}
                                     placeholder="Write meeting notes or short description..."
-                                    className="min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                                    className="min-h-30 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                                 />
                             </div>
                         </div>
 
                         <div className="flex items-center gap-3">
                             <Button type="submit" disabled={loading}>
-                                {loading ? "Saving..." : isEdit ? "Update Meeting" : "Save Meeting"}
+                                {loading
+                                    ? "Saving..."
+                                    : isEdit
+                                        ? "Update Meeting"
+                                        : "Save Meeting"}
                             </Button>
 
-                            <Button type="button" variant="secondary" onClick={() => router.push("/tutor/meetings")}>
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => router.push("/tutor/meetings")}
+                            >
                                 Cancel
                             </Button>
                         </div>
@@ -264,5 +349,13 @@ export default function TutorMeetingCreatePage() {
                 </CardContent>
             </Card>
         </div>
+    );
+}
+
+export default function TutorMeetingCreatePage() {
+    return (
+        <Suspense fallback={<MeetingCreatePageFallback />}>
+            <TutorMeetingCreatePageContent />
+        </Suspense>
     );
 }

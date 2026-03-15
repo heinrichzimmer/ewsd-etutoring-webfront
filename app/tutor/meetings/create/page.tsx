@@ -23,6 +23,16 @@ type Student = {
     email: string;
 };
 
+type AllocationSlot = {
+    scheduleStart: string; // e.g. "21/03/2026 02:30"
+    scheduleEnd: string;   // e.g. "28/03/2026 02:30"
+};
+
+type AllocatedStudent = {
+    student: Student;
+    allocationSlots: AllocationSlot[];
+};
+
 function fullName(u: Student) {
     return `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.username;
 }
@@ -40,17 +50,49 @@ function isoToLocalInput(iso?: string | null) {
     return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
 }
 
+// Backend slot format is dd/MM/yyyy HH:mm
+// Parse it as UTC to avoid timezone shifting bugs.
+function backendSlotToUtcIso(value: string) {
+    const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})$/);
+    if (!match) return "";
+
+    const [, dd, mm, yyyy, hh, min] = match;
+    const utcMs = Date.UTC(
+        Number(yyyy),
+        Number(mm) - 1,
+        Number(dd),
+        Number(hh),
+        Number(min),
+        0,
+        0
+    );
+
+    return new Date(utcMs).toISOString();
+}
+
+function formatSlotLabel(start: string, end: string) {
+    return `${start} → ${end}`;
+}
+
 export default function TutorMeetingCreatePage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const meetingId = searchParams.get("id");
 
-    const [students, setStudents] = useState<Student[]>([]);
+    const [allocatedStudents, setAllocatedStudents] = useState<AllocatedStudent[]>([]);
     const [loading, setLoading] = useState(false);
 
     const [studentUserId, setStudentUserId] = useState("");
+    const [selectedSlotIndex, setSelectedSlotIndex] = useState("");
+
+    // display-only values for inputs
     const [startDate, setStartDate] = useState("");
     const [endDate, setEndDate] = useState("");
+
+    // real payload values (important)
+    const [selectedSlotStartIso, setSelectedSlotStartIso] = useState("");
+    const [selectedSlotEndIso, setSelectedSlotEndIso] = useState("");
+
     const [mode, setMode] = useState<"VIRTUAL" | "IN_PERSON">("VIRTUAL");
     const [location, setLocation] = useState("Online");
     const [link, setLink] = useState("");
@@ -58,8 +100,15 @@ export default function TutorMeetingCreatePage() {
 
     const isEdit = useMemo(() => Boolean(meetingId), [meetingId]);
 
+    const selectedAllocatedStudent = useMemo(() => {
+        return allocatedStudents.find((item) => item.student.id === studentUserId) ?? null;
+    }, [allocatedStudents, studentUserId]);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const currentSlots = selectedAllocatedStudent?.allocationSlots ?? [];
+
     useEffect(() => {
-        async function loadStudents() {
+        async function loadAllocatedStudents() {
             const res = await fetch("/api/tutor/allocated-students");
             const data = await res.json().catch(() => ({}));
 
@@ -68,8 +117,7 @@ export default function TutorMeetingCreatePage() {
                 return;
             }
 
-            const list = Array.isArray(data) ? data : data?.content ?? [];
-            setStudents(list);
+            setAllocatedStudents(Array.isArray(data) ? data : []);
         }
 
         async function loadMeeting() {
@@ -84,15 +132,20 @@ export default function TutorMeetingCreatePage() {
             }
 
             setStudentUserId(data.studentUserId ?? "");
+
+            // For edit mode, keep existing values
+            setSelectedSlotStartIso(data.startDate ?? "");
+            setSelectedSlotEndIso(data.endDate ?? "");
             setStartDate(isoToLocalInput(data.startDate));
             setEndDate(isoToLocalInput(data.endDate));
+
             setMode(data.mode ?? "VIRTUAL");
             setLocation(data.location ?? (data.mode === "IN_PERSON" ? "" : "Online"));
             setLink(data.link ?? "");
             setDescription(data.description ?? "");
         }
 
-        loadStudents();
+        loadAllocatedStudents();
         loadMeeting();
     }, [meetingId]);
 
@@ -105,20 +158,65 @@ export default function TutorMeetingCreatePage() {
         }
     }, [mode, location]);
 
+    useEffect(() => {
+        // reset slot/date when student changes in create mode
+        setSelectedSlotIndex("");
+
+        if (!isEdit) {
+            setSelectedSlotStartIso("");
+            setSelectedSlotEndIso("");
+            setStartDate("");
+            setEndDate("");
+        }
+    }, [studentUserId, isEdit]);
+
+    useEffect(() => {
+        if (!selectedSlotIndex) return;
+
+        const slot = currentSlots[Number(selectedSlotIndex)];
+        if (!slot) return;
+
+        const startIso = backendSlotToUtcIso(slot.scheduleStart);
+        const endIso = backendSlotToUtcIso(slot.scheduleEnd);
+
+        setSelectedSlotStartIso(startIso);
+        setSelectedSlotEndIso(endIso);
+
+        // display in local input, but submit the exact ISO above
+        setStartDate(isoToLocalInput(startIso));
+        setEndDate(isoToLocalInput(endIso));
+    }, [selectedSlotIndex, currentSlots]);
+
     async function onSubmit(e: React.FormEvent) {
         e.preventDefault();
 
-        if (!studentUserId) return toast.error("Please select a student.");
-        if (!startDate || !endDate) return toast.error("Please select start and end date.");
-        if (mode === "VIRTUAL" && !link) return toast.error("Meeting link is required for virtual meetings.");
-        if (mode === "IN_PERSON" && !location) return toast.error("Location is required for in-person meetings.");
+        if (!studentUserId) {
+            toast.error("Please select a student.");
+            return;
+        }
+
+        if (!selectedSlotStartIso || !selectedSlotEndIso) {
+            toast.error("Please select an allocation slot.");
+            return;
+        }
+
+        if (mode === "VIRTUAL" && !link) {
+            toast.error("Meeting link is required for virtual meetings.");
+            return;
+        }
+
+        if (mode === "IN_PERSON" && !location) {
+            toast.error("Location is required for in-person meetings.");
+            return;
+        }
 
         setLoading(true);
 
         const payload = {
             studentUserId,
-            startDate: new Date(startDate).toISOString(),
-            endDate: new Date(endDate).toISOString(),
+            // submit exact UTC values from selected slot
+            startDate: selectedSlotStartIso,
+            endDate: selectedSlotEndIso,
             mode,
             location: mode === "IN_PERSON" ? location : "Online",
             link: mode === "VIRTUAL" ? link : null,
@@ -157,7 +255,7 @@ export default function TutorMeetingCreatePage() {
                     {isEdit ? "Edit Meeting" : "Schedule New Meeting"}
                 </h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                    Create and manage meeting sessions for your allocated students.
+                    Create a meeting using the allocated time slot of the selected student.
                 </p>
             </div>
 
@@ -178,13 +276,32 @@ export default function TutorMeetingCreatePage() {
                                         <SelectValue placeholder="Choose a student" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {students.map((s) => (
-                                            <SelectItem key={s.id} value={s.id}>
-                                                {fullName(s)} ({s.email})
+                                        {allocatedStudents.map((item) => (
+                                            <SelectItem key={item.student.id} value={item.student.id}>
+                                                {fullName(item.student)} ({item.student.email})
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
+                            </div>
+
+                            <div className="space-y-2 md:col-span-2">
+                                <label className="text-sm font-medium">Available Allocation Slot</label>
+                                <Select value={selectedSlotIndex} onValueChange={setSelectedSlotIndex}>
+                                    <SelectTrigger className="w-full">
+                                        <SelectValue placeholder="Choose one allocated slot" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {currentSlots.map((slot, index) => (
+                                            <SelectItem key={index} value={String(index)}>
+                                                {formatSlotLabel(slot.scheduleStart, slot.scheduleEnd)}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <p className="text-xs text-muted-foreground">
+                                    Tutors can only create meetings within the allocated slot for the selected student.
+                                </p>
                             </div>
 
                             <div className="space-y-2">
@@ -211,20 +328,12 @@ export default function TutorMeetingCreatePage() {
 
                             <div className="space-y-2">
                                 <label className="text-sm font-medium">Start Date & Time</label>
-                                <Input
-                                    type="datetime-local"
-                                    value={startDate}
-                                    onChange={(e) => setStartDate(e.target.value)}
-                                />
+                                <Input type="datetime-local" value={startDate} readOnly disabled />
                             </div>
 
                             <div className="space-y-2">
                                 <label className="text-sm font-medium">End Date & Time</label>
-                                <Input
-                                    type="datetime-local"
-                                    value={endDate}
-                                    onChange={(e) => setEndDate(e.target.value)}
-                                />
+                                <Input type="datetime-local" value={endDate} readOnly disabled />
                             </div>
 
                             <div className="space-y-2 md:col-span-2">

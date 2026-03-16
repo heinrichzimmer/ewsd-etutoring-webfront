@@ -16,7 +16,19 @@ type Student = {
     role?: string;
     isActive?: boolean;
     isLocked?: boolean;
+    createdDate?: string | null;
+    updatedDate?: string | null;
     lastLoginDate?: string | null;
+};
+
+type AllocationSlot = {
+    scheduleStart: string;
+    scheduleEnd: string;
+};
+
+type AllocatedStudent = {
+    student: Student;
+    allocationSlots: AllocationSlot[];
 };
 
 function fullName(u: Student) {
@@ -24,7 +36,7 @@ function fullName(u: Student) {
 }
 
 export default function TutorStudentsPage() {
-    const [students, setStudents] = useState<Student[]>([]);
+    const [items, setItems] = useState<AllocatedStudent[]>([]);
     const [query, setQuery] = useState("");
 
     async function load() {
@@ -36,8 +48,7 @@ export default function TutorStudentsPage() {
             return;
         }
 
-        const list = Array.isArray(data) ? data : data?.content ?? [];
-        setStudents(list);
+        setItems(Array.isArray(data) ? data : []);
     }
 
     useEffect(() => {
@@ -46,13 +57,14 @@ export default function TutorStudentsPage() {
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
-        if (!q) return students;
+        if (!q) return items;
 
-        return students.filter((s) => {
+        return items.filter((item) => {
+            const s = item.student;
             const text = `${fullName(s)} ${s.username ?? ""} ${s.email ?? ""}`.toLowerCase();
             return text.includes(q);
         });
-    }, [students, query]);
+    }, [items, query]);
 
     return (
         <div className="space-y-4">
@@ -84,26 +96,64 @@ export default function TutorStudentsPage() {
                                 <th className="px-3 py-3 text-left">Name</th>
                                 <th className="px-3 py-3 text-left">Username</th>
                                 <th className="px-3 py-3 text-left">Email</th>
+                                <th className="px-3 py-3 text-left">Allocation Slots</th>
                                 <th className="px-3 py-3 text-left">Status</th>
                             </tr>
                             </thead>
 
                             <tbody>
-                            {filtered.map((s, idx) => (
-                                <tr key={s.id} className="border-b">
-                                    <td className="px-3 py-3">{idx + 1}</td>
-                                    <td className="px-3 py-3 font-medium">{fullName(s)}</td>
-                                    <td className="px-3 py-3">{s.username}</td>
-                                    <td className="px-3 py-3">{s.email}</td>
-                                    <td className="px-3 py-3">
-                                        {s.isActive === false ? "Inactive" : "Active"}
-                                    </td>
-                                </tr>
-                            ))}
+                            {filtered.map((item, idx) => {
+                                const s = item.student;
+
+                                return (
+                                    <tr key={s.id} className="border-b align-top">
+                                        <td className="px-3 py-3">{idx + 1}</td>
+
+                                        <td className="px-3 py-3 font-medium">
+                                            <div className="flex flex-col">
+                                                <span>{fullName(s)}</span>
+                                                {s.lastLoginDate && (
+                                                    <span className="text-xs text-muted-foreground">
+                              Last login: {s.lastLoginDate}
+                            </span>
+                                                )}
+                                            </div>
+                                        </td>
+
+                                        <td className="px-3 py-3">{s.username}</td>
+
+                                        <td className="px-3 py-3">{s.email}</td>
+
+                                        <td className="px-3 py-3">
+                                            {item.allocationSlots.length > 0 ? (
+                                                <div className="space-y-2">
+                                                    {item.allocationSlots.map((slot, slotIdx) => (
+                                                        <div
+                                                            key={slotIdx}
+                                                            className="rounded-md border bg-slate-50 px-2 py-1 text-xs"
+                                                        >
+                                                            <div>{slot.scheduleStart}</div>
+                                                            <div className="text-muted-foreground">
+                                                                → {slot.scheduleEnd}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-muted-foreground">No slots</span>
+                                            )}
+                                        </td>
+
+                                        <td className="px-3 py-3">
+                                            {s.isActive === false ? "Inactive" : "Active"}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
 
                             {filtered.length === 0 && (
                                 <tr>
-                                    <td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">
+                                    <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">
                                         No assigned students found.
                                     </td>
                                 </tr>

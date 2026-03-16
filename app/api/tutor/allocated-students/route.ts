@@ -1,65 +1,73 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-type Student = {
-    id: string;
-    username: string;
-    firstName: string;
-    lastName: string;
-    email: string;
-    role?: string;
-    isActive?: boolean;
-    isLocked?: boolean;
-    lastLoginDate?: string | null;
-};
-
-function toStudent(raw: unknown): Student | null {
-    if (!raw || typeof raw !== "object") return null;
-
-    const obj = raw as Record<string, unknown>;
-
-    // Case 1: already a student/user object
-    if (
-        typeof obj.id === "string" &&
-        (typeof obj.username === "string" || typeof obj.email === "string")
-    ) {
-        return {
-            id: obj.id,
-            username: typeof obj.username === "string" ? obj.username : "",
-            firstName: typeof obj.firstName === "string" ? obj.firstName : "",
-            lastName: typeof obj.lastName === "string" ? obj.lastName : "",
-            email: typeof obj.email === "string" ? obj.email : "",
-            role: typeof obj.role === "string" ? obj.role : undefined,
-            isActive: typeof obj.isActive === "boolean" ? obj.isActive : undefined,
-            isLocked: typeof obj.isLocked === "boolean" ? obj.isLocked : undefined,
-            lastLoginDate:
-                typeof obj.lastLoginDate === "string" ? obj.lastLoginDate : null,
-        };
-    }
-
-    // Case 2: nested objects
-    if (obj.student) return toStudent(obj.student);
-    if (obj.user) return toStudent(obj.user);
-    if (obj.studentUser) return toStudent(obj.studentUser);
-    if (obj.studentUserDto) return toStudent(obj.studentUserDto);
-
-    return null;
-}
-
-function isStudent(value: Student | null): value is Student {
-    return value !== null;
-}
-
 async function safeJson(res: Response) {
     const text = await res.text();
     try {
-        return JSON.parse(text) as unknown;
+        return JSON.parse(text);
     } catch {
         return { raw: text };
     }
 }
 
-export async function GET(): Promise<NextResponse> {
+type Student = {
+    id: string;
+    role: string;
+    username: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    isActive?: boolean;
+    isLocked?: boolean;
+    createdDate?: string | null;
+    updatedDate?: string | null;
+    lastLoginDate?: string | null;
+};
+
+type AllocationSlot = {
+    scheduleStart: string;
+    scheduleEnd: string;
+};
+
+type AllocatedStudent = {
+    student: Student;
+    allocationSlots: AllocationSlot[];
+};
+
+function normalizeAllocatedStudent(raw: any): AllocatedStudent | null {
+    if (!raw || typeof raw !== "object") return null;
+    if (!raw.student || typeof raw.student !== "object") return null;
+
+    const student = raw.student;
+    const slots = Array.isArray(raw.allocationSlots) ? raw.allocationSlots : [];
+
+    if (typeof student.id !== "string") return null;
+
+    return {
+        student: {
+            id: student.id,
+            role: student.role ?? "STUDENT",
+            username: student.username ?? "",
+            firstName: student.firstName ?? "",
+            lastName: student.lastName ?? "",
+            email: student.email ?? "",
+            isActive: student.isActive,
+            isLocked: student.isLocked,
+            createdDate: student.createdDate ?? null,
+            updatedDate: student.updatedDate ?? null,
+            lastLoginDate: student.lastLoginDate ?? null,
+        },
+        allocationSlots: slots
+            .filter((slot: any) => slot && typeof slot === "object")
+            .map((slot: any) => ({
+                scheduleStart: slot.scheduleStart ?? "",
+                scheduleEnd: slot.scheduleEnd ?? "",
+            }))
+            .filter((slot: AllocationSlot) => slot.scheduleStart && slot.scheduleEnd),
+    };
+}
+
+export async function GET() {
     const cookieStore = await cookies();
     const token = cookieStore.get("access_token")?.value;
 
@@ -86,24 +94,10 @@ export async function GET(): Promise<NextResponse> {
             return NextResponse.json(data, { status: res.status });
         }
 
-        const rawList: unknown[] = Array.isArray(data)
-            ? data
-            : data &&
-            typeof data === "object" &&
-            "content" in data &&
-            Array.isArray((data as { content?: unknown[] }).content)
-                ? (data as { content: unknown[] }).content
-                : data &&
-                typeof data === "object" &&
-                "items" in data &&
-                Array.isArray((data as { items?: unknown[] }).items)
-                    ? (data as { items: unknown[] }).items
-                    : [];
-
-        const normalized: Student[] = rawList
-            .map(toStudent)
-            .filter(isStudent)
-            .filter((student, index, arr) => arr.findIndex((x) => x.id === student.id) === index);
+        const list = Array.isArray(data) ? data : [];
+        const normalized = list
+            .map(normalizeAllocatedStudent)
+            .filter((item): item is AllocatedStudent => item !== null);
 
         return NextResponse.json(normalized);
     } catch (e: unknown) {

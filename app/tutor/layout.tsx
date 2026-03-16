@@ -14,6 +14,7 @@ import {
     LogOut,
     ArrowLeft,
     UserCircle2,
+    MessageSquare
 } from "lucide-react";
 
 const navItems = [
@@ -22,6 +23,7 @@ const navItems = [
     { href: "/tutor/blogs", label: "Blogs", icon: BookOpen },
     { href: "/tutor/meetings", label: "Schedule Meeting", icon: CalendarDays },
     { href: "/tutor/files", label: "Uploaded Files", icon: Upload },
+    { href: "/tutor/messages", label: "Messages", icon: MessageSquare },
 ];
 
 export default function TutorLayout({ children }: { children: React.ReactNode }) {

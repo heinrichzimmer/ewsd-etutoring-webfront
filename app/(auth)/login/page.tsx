@@ -42,6 +42,8 @@ export default function LoginPage() {
                 router.push("/staff");
             } else if (data?.role === "TUTOR") {
                 router.push("/tutor");
+            } else if (data?.role === "STUDENT") {
+                router.push("/student");
             } else {
                 setError("This account does not have dashboard access.");
                 return;

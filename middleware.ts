@@ -14,7 +14,13 @@ export function middleware(req: NextRequest) {
     }
 
     if (pathname.startsWith("/tutor")) {
-        if (!token) {
+        if (!token || role !== "tutor") {
+            return NextResponse.redirect(new URL("/login", req.url));
+        }
+    }
+
+    if (pathname.startsWith("/student")) {
+        if (!token || role !== "student") {
             return NextResponse.redirect(new URL("/login", req.url));
         }
     }
@@ -23,5 +29,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-    matcher: ["/staff/:path*", "/tutor/:path*"],
+    matcher: ["/staff/:path*", "/tutor/:path*", "/student/:path*"],
 };

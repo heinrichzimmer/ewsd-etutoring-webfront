@@ -31,16 +31,6 @@ type Message = {
     createdAt?: string;
 };
 
-type AllocatedStudent = {
-    student: {
-        id: string;
-        firstName: string;
-        lastName: string;
-        username: string;
-        email: string;
-    };
-};
-
 type UserLite = {
     id: string;
     firstName?: string;
@@ -70,53 +60,71 @@ function formatTime(value?: string | null) {
     });
 }
 
+function normalizeAllocatedStudent(raw: any): UserLite | null {
+    const s = raw?.student;
+    if (!s || typeof s.id !== "string") return null;
+
+    return {
+        id: s.id,
+        firstName: s.firstName ?? "",
+        lastName: s.lastName ?? "",
+        username: s.username ?? "",
+        email: s.email ?? "",
+    };
+}
+
+function normalizeAllocatedTutor(raw: any): UserLite | null {
+    const t = raw?.tutor ?? raw?.tutorUser ?? raw;
+    if (!t || typeof t.id !== "string") return null;
+
+    return {
+        id: t.id,
+        firstName: t.firstName ?? "",
+        lastName: t.lastName ?? "",
+        username: t.username ?? "",
+        email: t.email ?? "",
+    };
+}
+
 export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
     const [me, setMe] = useState<Me | null>(null);
-    const [allocatedStudents, setAllocatedStudents] = useState<AllocatedStudent[]>([]);
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [selectedConversationId, setSelectedConversationId] = useState("");
     const [messages, setMessages] = useState<Message[]>([]);
     const [draft, setDraft] = useState("");
     const [loadingMessages, setLoadingMessages] = useState(false);
+
+    const [allocatedStudents, setAllocatedStudents] = useState<UserLite[]>([]);
+    const [allocatedTutors, setAllocatedTutors] = useState<UserLite[]>([]);
     const [userMap, setUserMap] = useState<Record<string, UserLite>>({});
 
-    async function fetchUser(id: string) {
-        if (!id || userMap[id]) return;
-
-        const res = await fetch(`/api/users/${id}`);
-        const data = await res.json().catch(() => ({}));
-
-        if (res.ok) {
-            setUserMap((prev) => ({
-                ...prev,
-                [id]: data,
-            }));
-        }
-    }
-
-    async function loadMe() {
+    async function loadMe(silent = false) {
         const res = await fetch("/api/me");
         const data = await res.json().catch(() => ({}));
 
         if (!res.ok) {
-            toast.error(data?.message ?? "Failed to load current user");
+            if (!silent) toast.error(data?.message ?? "Failed to load current user");
             return null;
         }
 
         setMe(data);
-        return data;
+        setUserMap((prev) => ({
+            ...prev,
+            [data.id]: data,
+        }));
+        return data as Me;
     }
 
-    async function loadSidebarData(currentMe?: Me | null) {
+    async function loadSidebarData(currentMe?: Me | null, silent = false) {
         const convRes = await fetch("/api/conversations?page=0&size=20");
         const convData = await convRes.json().catch(() => ({}));
 
         if (!convRes.ok) {
-            toast.error(convData?.message ?? "Failed to load conversations");
+            if (!silent) toast.error(convData?.message ?? "Failed to load conversations");
             return;
         }
 
-        const convList = Array.isArray(convData) ? convData : convData?.content ?? [];
+        const convList: Conversation[] = Array.isArray(convData) ? convData : convData?.content ?? [];
         setConversations(convList);
 
         const meValue = currentMe ?? me;
@@ -132,32 +140,51 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
             const stuData = await stuRes.json().catch(() => ({}));
 
             if (!stuRes.ok) {
-                toast.error(stuData?.message ?? "Failed to load allocated students");
+                if (!silent) toast.error(stuData?.message ?? "Failed to load allocated students");
                 return;
             }
 
-            const students = Array.isArray(stuData) ? stuData : [];
+            const students = (Array.isArray(stuData) ? stuData : stuData?.content ?? [])
+                .map(normalizeAllocatedStudent)
+                .filter((x): x is UserLite => x !== null);
+
             setAllocatedStudents(students);
 
-            students.forEach((item: AllocatedStudent) => {
-                setUserMap((prev) => ({
-                    ...prev,
-                    [item.student.id]: item.student,
-                }));
+            setUserMap((prev) => {
+                const next = { ...prev };
+                students.forEach((s) => {
+                    next[s.id] = s;
+                });
+                return next;
             });
 
-            // ✅ tutor side already has all names it needs
             return;
         }
 
-        // only student side still needs extra user lookups
-        convList.forEach((c: Conversation) => {
-            if (c.tutorUserId) fetchUser(c.tutorUserId);
-            if (c.studentUserId) fetchUser(c.studentUserId);
+        const tutorRes = await fetch("/api/student/allocated-tutors");
+        const tutorData = await tutorRes.json().catch(() => ({}));
+
+        if (!tutorRes.ok) {
+            if (!silent) toast.error(tutorData?.message ?? "Failed to load allocated tutors");
+            return;
+        }
+
+        const tutors = (Array.isArray(tutorData) ? tutorData : tutorData?.content ?? [])
+            .map(normalizeAllocatedTutor)
+            .filter((x): x is UserLite => x !== null);
+
+        setAllocatedTutors(tutors);
+
+        setUserMap((prev) => {
+            const next = { ...prev };
+            tutors.forEach((t) => {
+                next[t.id] = t;
+            });
+            return next;
         });
     }
 
-    async function loadMessages(conversationId: string) {
+    async function loadMessages(conversationId: string, silent = false) {
         if (!conversationId) return;
 
         setLoadingMessages(true);
@@ -166,12 +193,12 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
         const data = await res.json().catch(() => ({}));
 
         if (!res.ok) {
-            toast.error(data?.message ?? "Failed to load messages");
+            if (!silent) toast.error(data?.message ?? "Failed to load messages");
             setLoadingMessages(false);
             return;
         }
 
-        const list = Array.isArray(data) ? data : data?.content ?? [];
+        const list: Message[] = Array.isArray(data) ? data : data?.content ?? [];
         setMessages(list);
         setLoadingMessages(false);
 
@@ -180,7 +207,7 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
         }).catch(() => {});
     }
 
-    async function createConversation(studentUserId: string) {
+    async function createConversationForTutor(studentUserId: string) {
         if (!me?.id) {
             toast.error("Current tutor profile is not loaded yet.");
             return;
@@ -211,7 +238,46 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
             return;
         }
 
-        await loadSidebarData();
+        await loadSidebarData(undefined, true);
+
+        if (data?.id) {
+            setSelectedConversationId(data.id);
+            await loadMessages(data.id);
+        }
+    }
+
+    async function createConversationForStudent(tutorUserId: string) {
+        if (!me?.id) {
+            toast.error("Current student profile is not loaded yet.");
+            return;
+        }
+
+        const existing = conversations.find((c) => c.tutorUserId === tutorUserId);
+        if (existing) {
+            setSelectedConversationId(existing.id);
+            await loadMessages(existing.id);
+            return;
+        }
+
+        const res = await fetch("/api/conversations", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                tutorUserId,
+                studentUserId: me.id,
+            }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+            toast.error(data?.message ?? "Failed to create conversation");
+            return;
+        }
+
+        await loadSidebarData(undefined, true);
 
         if (data?.id) {
             setSelectedConversationId(data.id);
@@ -238,8 +304,8 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
         }
 
         setDraft("");
-        await loadMessages(selectedConversationId);
-        await loadSidebarData();
+        await loadMessages(selectedConversationId, true);
+        await loadSidebarData(undefined, true);
     }
 
     useEffect(() => {
@@ -251,45 +317,19 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
 
     useEffect(() => {
         if (!selectedConversationId) return;
-        loadMessages(selectedConversationId);
+        loadMessages(selectedConversationId, true);
     }, [selectedConversationId]);
 
     useEffect(() => {
         const timer = setInterval(() => {
-            loadSidebarData();
+            loadSidebarData(undefined, true);
             if (selectedConversationId) {
-                loadMessages(selectedConversationId);
+                loadMessages(selectedConversationId, true);
             }
         }, 5000);
 
         return () => clearInterval(timer);
     }, [selectedConversationId, me?.id, isTutor]);
-
-    const conversationTitle = (c: Conversation) => {
-        if (isTutor) {
-            const student =
-                userMap[c.studentUserId ?? ""] ||
-                allocatedStudents.find((x) => x.student.id === c.studentUserId)?.student;
-
-            return fullName(student);
-        }
-
-        const tutor = userMap[c.tutorUserId ?? ""];
-        return fullName(tutor);
-    };
-
-    const conversationSubtitle = (c: Conversation) => {
-        if (isTutor) {
-            const student =
-                userMap[c.studentUserId ?? ""] ||
-                allocatedStudents.find((x) => x.student.id === c.studentUserId)?.student;
-
-            return student?.email ?? "";
-        }
-
-        const tutor = userMap[c.tutorUserId ?? ""];
-        return tutor?.email ?? "";
-    };
 
     const sortedMessages = useMemo(() => {
         return [...messages].sort((a, b) => {
@@ -299,41 +339,84 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
         });
     }, [messages]);
 
+    const conversationTitle = (c: Conversation) => {
+        if (isTutor) {
+            const student = userMap[c.studentUserId ?? ""];
+            return student ? fullName(student) : "Student";
+        }
+
+        const tutor = userMap[c.tutorUserId ?? ""];
+        return tutor ? fullName(tutor) : "My Tutor";
+    };
+
+    const conversationSubtitle = (c: Conversation) => {
+        if (isTutor) {
+            const student = userMap[c.studentUserId ?? ""];
+            return student?.email ?? (c.lastMessageAt ? formatTime(c.lastMessageAt) : "");
+        }
+
+        const tutor = userMap[c.tutorUserId ?? ""];
+        return tutor?.email ?? (c.lastMessageAt ? formatTime(c.lastMessageAt) : "Tutor conversation");
+    };
+
     return (
         <div className="grid gap-4 md:grid-cols-[320px_1fr]">
             <div className="rounded-xl border bg-white">
                 <div className="border-b px-4 py-3 font-medium">
-                    {isTutor ? "Students" : "Conversations"}
+                    {isTutor ? "Students" : "Tutors"}
                 </div>
 
-                <div className="max-h-[650px] overflow-auto">
+                <div className="max-h-162.5 overflow-auto">
                     {isTutor ? (
                         allocatedStudents.length > 0 ? (
-                            allocatedStudents.map((item) => {
-                                const existing = conversations.find((c) => c.studentUserId === item.student.id);
+                            allocatedStudents.map((student) => {
+                                const existing = conversations.find((c) => c.studentUserId === student.id);
 
                                 return (
                                     <button
-                                        key={item.student.id}
+                                        key={student.id}
                                         onClick={() => {
                                             if (existing) {
                                                 setSelectedConversationId(existing.id);
                                             } else {
-                                                createConversation(item.student.id);
+                                                createConversationForTutor(student.id);
                                             }
                                         }}
                                         className={`flex w-full flex-col border-b px-4 py-3 text-left hover:bg-slate-50 ${
                                             existing?.id === selectedConversationId ? "bg-slate-50" : ""
                                         }`}
                                     >
-                                        <span className="font-medium">{fullName(item.student)}</span>
-                                        <span className="text-xs text-muted-foreground">{item.student.email}</span>
+                                        <span className="font-medium">{fullName(student)}</span>
+                                        <span className="text-xs text-muted-foreground">{student.email}</span>
                                     </button>
                                 );
                             })
                         ) : (
                             <div className="p-4 text-sm text-muted-foreground">No allocated students.</div>
                         )
+                    ) : allocatedTutors.length > 0 ? (
+                        allocatedTutors.map((tutor) => {
+                            const existing = conversations.find((c) => c.tutorUserId === tutor.id);
+
+                            return (
+                                <button
+                                    key={tutor.id}
+                                    onClick={() => {
+                                        if (existing) {
+                                            setSelectedConversationId(existing.id);
+                                        } else {
+                                            createConversationForStudent(tutor.id);
+                                        }
+                                    }}
+                                    className={`flex w-full flex-col border-b px-4 py-3 text-left hover:bg-slate-50 ${
+                                        existing?.id === selectedConversationId ? "bg-slate-50" : ""
+                                    }`}
+                                >
+                                    <span className="font-medium">{fullName(tutor)}</span>
+                                    <span className="text-xs text-muted-foreground">{tutor.email}</span>
+                                </button>
+                            );
+                        })
                     ) : conversations.length > 0 ? (
                         conversations.map((c) => (
                             <button
@@ -345,12 +428,12 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
                             >
                                 <span className="font-medium">{conversationTitle(c)}</span>
                                 <span className="text-xs text-muted-foreground">
-                  {conversationSubtitle(c) || (c.lastMessageAt ? formatTime(c.lastMessageAt) : "No messages yet")}
+                  {conversationSubtitle(c)}
                 </span>
                             </button>
                         ))
                     ) : (
-                        <div className="p-4 text-sm text-muted-foreground">No conversations yet.</div>
+                        <div className="p-4 text-sm text-muted-foreground">No tutor conversation yet.</div>
                     )}
                 </div>
             </div>
@@ -361,14 +444,14 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
                 <div className="flex-1 space-y-3 overflow-auto p-4">
                     {!selectedConversationId ? (
                         <div className="text-sm text-muted-foreground">
-                            {isTutor ? "Select a student to start chatting." : "Select a conversation."}
+                            {isTutor ? "Select a student to start chatting." : "Select your tutor to start chatting."}
                         </div>
                     ) : loadingMessages ? (
                         <div className="text-sm text-muted-foreground">Loading messages...</div>
                     ) : sortedMessages.length > 0 ? (
                         sortedMessages.map((m) => {
                             const senderId = m.senderUserId;
-                            const mine = senderId && me?.id ? senderId === me.id : false;
+                            const mine = Boolean(senderId && me?.id && senderId === me.id);
                             const sender = senderId ? userMap[senderId] : undefined;
 
                             return (
@@ -384,7 +467,7 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
                                         }`}
                                     >
                                         <div className="mb-1 text-[11px] opacity-70">
-                                            {mine ? "You" : fullName(sender)}
+                                            {mine ? "You" : sender ? fullName(sender) : isTutor ? "Student" : "Tutor"}
                                         </div>
                                         <div className="text-sm">{m.body || m.content || ""}</div>
                                         <div className="mt-1 text-[11px] opacity-70">

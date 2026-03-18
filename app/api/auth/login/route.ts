@@ -32,12 +32,22 @@ export async function POST(req: Request) {
         path: "/",
     });
 
-    // make your existing middleware work (staff dashboard access)
-    out.cookies.set("sessionRole", data.role === "ADMIN" ? "staff" : data.role === "TUTOR" ? "tutor" : "user", {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-    });
+
+    out.cookies.set(
+        "sessionRole",
+        data.role === "ADMIN"
+            ? "staff"
+            : data.role === "TUTOR"
+                ? "tutor"
+                : data.role === "STUDENT"
+                    ? "student"
+                    : "user",
+        {
+            httpOnly: true,
+            sameSite: "lax",
+            path: "/",
+        }
+    );
 
     return out;
 }

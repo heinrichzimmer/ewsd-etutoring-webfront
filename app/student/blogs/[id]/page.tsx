@@ -20,6 +20,7 @@ type Comment = {
     comment: string;
     createdAt?: string | null;
     authorName?: string;
+    authorUserId?: string;
 };
 
 type BlogDetail = {
@@ -29,6 +30,22 @@ type BlogDetail = {
     updatedAt?: string | null;
     attachments: Attachment[];
     comments: Comment[];
+};
+
+type Me = {
+    id: string;
+    username?: string;
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+};
+
+type UserLite = {
+    id: string;
+    username?: string;
+    firstName?: string;
+    lastName?: string;
+    email?: string;
 };
 
 function formatDate(value?: string | null) {
@@ -44,52 +61,130 @@ function formatDate(value?: string | null) {
     });
 }
 
-function normalizeAttachment(raw: any): Attachment | null {
+function fullName(u?: {
+    firstName?: string;
+    lastName?: string;
+    username?: string;
+    email?: string;
+}) {
+    if (!u) return "Unknown";
+    return `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.username || u.email || "Unknown";
+}
+
+function normalizeAttachment(raw: unknown): Attachment | null {
     if (!raw || typeof raw !== "object") return null;
-    const id = raw.id ?? raw.attachmentId;
-    if (typeof id !== "string") return null;
+
+    const obj = raw as Record<string, unknown>;
+    const id = typeof obj.id === "string" ? obj.id : typeof obj.attachmentId === "string" ? obj.attachmentId : null;
+    if (!id) return null;
 
     return {
         id,
-        fileName: raw.fileName ?? raw.originalFileName ?? raw.name ?? "Attachment",
+        fileName:
+            typeof obj.fileName === "string"
+                ? obj.fileName
+                : typeof obj.originalFileName === "string"
+                    ? obj.originalFileName
+                    : typeof obj.name === "string"
+                        ? obj.name
+                        : "Attachment",
     };
 }
 
-function normalizeComment(raw: any): Comment | null {
+function normalizeComment(raw: unknown): Comment | null {
     if (!raw || typeof raw !== "object") return null;
-    if (typeof raw.id !== "string") return null;
+
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.id !== "string") return null;
+
+    const nestedAuthor =
+        (obj.author as Record<string, unknown> | undefined) ??
+        (obj.user as Record<string, unknown> | undefined) ??
+        (obj.createdBy as Record<string, unknown> | undefined) ??
+        undefined;
+
+    const nestedAuthorName = nestedAuthor
+        ? `${typeof nestedAuthor.firstName === "string" ? nestedAuthor.firstName : ""} ${
+            typeof nestedAuthor.lastName === "string" ? nestedAuthor.lastName : ""
+        }`.trim() ||
+        (typeof nestedAuthor.username === "string" ? nestedAuthor.username : "") ||
+        (typeof nestedAuthor.email === "string" ? nestedAuthor.email : "")
+        : undefined;
+
+    const authorUserId =
+        typeof obj.authorUserId === "string"
+            ? obj.authorUserId
+            : typeof obj.userId === "string"
+                ? obj.userId
+                : typeof obj.createdById === "string"
+                    ? obj.createdById
+                    : nestedAuthor && typeof nestedAuthor.id === "string"
+                        ? nestedAuthor.id
+                        : undefined;
 
     return {
-        id: raw.id,
-        comment: raw.comment ?? raw.body ?? raw.content ?? "",
-        createdAt: raw.createdAt ?? raw.createdDate ?? null,
+        id: obj.id,
+        comment:
+            typeof obj.comment === "string"
+                ? obj.comment
+                : typeof obj.body === "string"
+                    ? obj.body
+                    : typeof obj.content === "string"
+                        ? obj.content
+                        : "",
+        createdAt:
+            typeof obj.createdAt === "string"
+                ? obj.createdAt
+                : typeof obj.createdDate === "string"
+                    ? obj.createdDate
+                    : null,
         authorName:
-            raw.authorName ??
-            raw.createdByName ??
-            raw.userName ??
-            raw.author?.username ??
-            "Unknown",
+            typeof obj.authorName === "string"
+                ? obj.authorName
+                : typeof obj.createdByName === "string"
+                    ? obj.createdByName
+                    : typeof obj.userName === "string"
+                        ? obj.userName
+                        : nestedAuthorName,
+        authorUserId,
     };
 }
 
-function normalizeBlog(raw: any): BlogDetail | null {
-    if (!raw || typeof raw !== "object" || typeof raw.id !== "string") return null;
+function normalizeBlog(raw: unknown): BlogDetail | null {
+    if (!raw || typeof raw !== "object") return null;
 
-    const attachments = (Array.isArray(raw.attachments) ? raw.attachments : [])
-        .map(normalizeAttachment)
-        .filter((x: Attachment | null): x is Attachment => x !== null);
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.id !== "string") return null;
 
-    const comments = (Array.isArray(raw.comments) ? raw.comments : [])
-        .map(normalizeComment)
-        .filter((x: Comment | null): x is Comment => x !== null);
+    const attachmentsRaw = Array.isArray(obj.attachments) ? obj.attachments : [];
+    const commentsRaw = Array.isArray(obj.comments) ? obj.comments : [];
 
     return {
-        id: raw.id,
-        body: raw.body ?? raw.content ?? "",
-        createdAt: raw.createdAt ?? raw.createdDate ?? null,
-        updatedAt: raw.updatedAt ?? raw.updatedDate ?? null,
-        attachments,
-        comments,
+        id: obj.id,
+        body:
+            typeof obj.body === "string"
+                ? obj.body
+                : typeof obj.content === "string"
+                    ? obj.content
+                    : "",
+        createdAt:
+            typeof obj.createdAt === "string"
+                ? obj.createdAt
+                : typeof obj.createdDate === "string"
+                    ? obj.createdDate
+                    : null,
+        updatedAt:
+            typeof obj.updatedAt === "string"
+                ? obj.updatedAt
+                : typeof obj.updatedDate === "string"
+                    ? obj.updatedDate
+                    : null,
+        attachments: attachmentsRaw
+            .map(normalizeAttachment)
+            .filter((x): x is Attachment => x !== null),
+        comments: commentsRaw
+            .map(normalizeComment)
+            .filter((x): x is Comment => x !== null),
     };
 }
 
@@ -107,6 +202,9 @@ export default function StudentBlogDetailPage() {
     const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
     const [editingCommentText, setEditingCommentText] = useState("");
 
+    const [me, setMe] = useState<Me | null>(null);
+    const [userMap, setUserMap] = useState<Record<string, UserLite>>({});
+
     async function loadBlog() {
         setLoading(true);
 
@@ -123,8 +221,52 @@ export default function StudentBlogDetailPage() {
         setLoading(false);
     }
 
+    async function loadCommentUsers() {
+        const [meRes, tutorsRes] = await Promise.all([
+            fetch("/api/me"),
+            fetch("/api/student/allocated-tutors"),
+        ]);
+
+        const meData = await meRes.json().catch(() => ({}));
+        const tutorsData = await tutorsRes.json().catch(() => ({}));
+
+        const nextMap: Record<string, UserLite> = {};
+
+        if (meRes.ok && meData?.id) {
+            const currentMe = meData as Me;
+            setMe(currentMe);
+            nextMap[currentMe.id] = currentMe;
+        }
+
+        const rawTutors: unknown[] = Array.isArray(tutorsData) ? tutorsData : tutorsData?.content ?? [];
+
+        rawTutors.forEach((item) => {
+            if (!item || typeof item !== "object") return;
+
+            const obj = item as Record<string, unknown>;
+            const tutor =
+                (obj.tutor as Record<string, unknown> | undefined) ??
+                (obj.tutorUser as Record<string, unknown> | undefined) ??
+                obj;
+
+            if (typeof tutor.id !== "string") return;
+
+            nextMap[tutor.id] = {
+                id: tutor.id,
+                username: typeof tutor.username === "string" ? tutor.username : "",
+                firstName: typeof tutor.firstName === "string" ? tutor.firstName : "",
+                lastName: typeof tutor.lastName === "string" ? tutor.lastName : "",
+                email: typeof tutor.email === "string" ? tutor.email : "",
+            };
+        });
+
+        setUserMap(nextMap);
+    }
+
     useEffect(() => {
-        if (blogId) loadBlog();
+        if (!blogId) return;
+        void loadBlog();
+        void loadCommentUsers();
     }, [blogId]);
 
     async function onSubmitComment(e: FormEvent) {
@@ -164,6 +306,11 @@ export default function StudentBlogDetailPage() {
     }
 
     function startEdit(comment: Comment) {
+        if (!canEditComment(comment)) {
+            toast.error("You can only edit your own comments.");
+            return;
+        }
+
         setEditingCommentId(comment.id);
         setEditingCommentText(comment.comment);
     }
@@ -205,6 +352,33 @@ export default function StudentBlogDetailPage() {
         } finally {
             setSavingEdit(false);
         }
+    }
+
+    function resolveCommentAuthor(comment: Comment) {
+        if (comment.authorName) return comment.authorName;
+        if (comment.authorUserId && userMap[comment.authorUserId]) {
+            return fullName(userMap[comment.authorUserId]);
+        }
+        return "Unknown";
+    }
+
+    function canEditComment(comment: Comment) {
+        if (!me) return false;
+
+        if (comment.authorUserId) {
+            return comment.authorUserId === me.id;
+        }
+
+        const resolvedAuthor = resolveCommentAuthor(comment).trim().toLowerCase();
+        const myFullName = fullName(me).trim().toLowerCase();
+        const myUsername = (me.username ?? "").trim().toLowerCase();
+        const myEmail = (me.email ?? "").trim().toLowerCase();
+
+        return (
+            resolvedAuthor === myFullName ||
+            resolvedAuthor === myUsername ||
+            resolvedAuthor === myEmail
+        );
     }
 
     const attachmentCount = useMemo(() => blog?.attachments.length ?? 0, [blog]);
@@ -323,10 +497,10 @@ export default function StudentBlogDetailPage() {
                                     blog.comments.map((comment) => (
                                         <div key={comment.id} className="rounded-md border bg-slate-50 p-3 space-y-3">
                                             <div className="text-xs text-muted-foreground">
-                                                {comment.authorName} • {formatDate(comment.createdAt)}
+                                                {resolveCommentAuthor(comment)} • {formatDate(comment.createdAt)}
                                             </div>
 
-                                            {editingCommentId === comment.id ? (
+                                            {editingCommentId === comment.id && canEditComment(comment) ? (
                                                 <div className="space-y-3">
                                                     <Input
                                                         value={editingCommentText}
@@ -336,7 +510,7 @@ export default function StudentBlogDetailPage() {
                                                     <div className="flex gap-2">
                                                         <Button
                                                             size="sm"
-                                                            onClick={() => saveEdit(comment.id)}
+                                                            onClick={() => void saveEdit(comment.id)}
                                                             disabled={savingEdit}
                                                         >
                                                             {savingEdit ? "Saving..." : "Save"}
@@ -349,13 +523,15 @@ export default function StudentBlogDetailPage() {
                                             ) : (
                                                 <>
                                                     <div className="text-sm whitespace-pre-wrap">{comment.comment}</div>
-                                                    <Button
-                                                        size="sm"
-                                                        variant="secondary"
-                                                        onClick={() => startEdit(comment)}
-                                                    >
-                                                        Edit Comment
-                                                    </Button>
+                                                    {canEditComment(comment) && (
+                                                        <Button
+                                                            size="sm"
+                                                            variant="secondary"
+                                                            onClick={() => startEdit(comment)}
+                                                        >
+                                                            Edit Comment
+                                                        </Button>
+                                                    )}
                                                 </>
                                             )}
                                         </div>

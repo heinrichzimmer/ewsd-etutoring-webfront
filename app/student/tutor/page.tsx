@@ -22,32 +22,29 @@ function fullName(u?: Tutor | null) {
     return `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.username || "Unknown Tutor";
 }
 
-function normalizeTutor(raw: any): Tutor | null {
+function normalizeTutor(raw: unknown): Tutor | null {
     if (!raw || typeof raw !== "object") return null;
 
-    if (raw.tutor && typeof raw.tutor === "object") {
-        return normalizeTutor(raw.tutor);
-    }
+    const obj = raw as Record<string, unknown>;
+    const nested =
+        (obj.tutor as Record<string, unknown> | undefined) ??
+        (obj.tutorUser as Record<string, unknown> | undefined) ??
+        obj;
 
-    if (raw.tutorUser && typeof raw.tutorUser === "object") {
-        return normalizeTutor(raw.tutorUser);
-    }
+    if (typeof nested.id !== "string") return null;
 
-    if (typeof raw.id === "string") {
-        return {
-            id: raw.id,
-            username: raw.username ?? "",
-            firstName: raw.firstName ?? "",
-            lastName: raw.lastName ?? "",
-            email: raw.email ?? "",
-            role: raw.role,
-            isActive: raw.isActive,
-            isLocked: raw.isLocked,
-            lastLoginDate: raw.lastLoginDate ?? null,
-        };
-    }
-
-    return null;
+    return {
+        id: nested.id,
+        username: typeof nested.username === "string" ? nested.username : "",
+        firstName: typeof nested.firstName === "string" ? nested.firstName : "",
+        lastName: typeof nested.lastName === "string" ? nested.lastName : "",
+        email: typeof nested.email === "string" ? nested.email : "",
+        role: typeof nested.role === "string" ? nested.role : undefined,
+        isActive: typeof nested.isActive === "boolean" ? nested.isActive : undefined,
+        isLocked: typeof nested.isLocked === "boolean" ? nested.isLocked : undefined,
+        lastLoginDate:
+            typeof nested.lastLoginDate === "string" ? nested.lastLoginDate : null,
+    };
 }
 
 export default function StudentTutorPage() {
@@ -62,8 +59,8 @@ export default function StudentTutorPage() {
             return;
         }
 
-        const list = Array.isArray(data) ? data : data?.content ?? [];
-        const normalized = list
+        const rawList: unknown[] = Array.isArray(data) ? data : data?.content ?? [];
+        const normalized: Tutor[] = rawList
             .map(normalizeTutor)
             .filter((x): x is Tutor => x !== null);
 
@@ -112,7 +109,9 @@ export default function StudentTutorPage() {
 
                             <div>
                                 <div className="text-sm font-medium">Last Login</div>
-                                <div className="text-sm text-muted-foreground">{tutor.lastLoginDate ?? "-"}</div>
+                                <div className="text-sm text-muted-foreground">
+                                    {tutor.lastLoginDate ?? "-"}
+                                </div>
                             </div>
                         </>
                     ) : (

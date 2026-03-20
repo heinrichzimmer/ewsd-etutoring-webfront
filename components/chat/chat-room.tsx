@@ -60,29 +60,39 @@ function formatTime(value?: string | null) {
     });
 }
 
-function normalizeAllocatedStudent(raw: any): UserLite | null {
-    const s = raw?.student;
+function normalizeAllocatedStudent(raw: unknown): UserLite | null {
+    if (!raw || typeof raw !== "object") return null;
+
+    const obj = raw as Record<string, unknown>;
+    const s = obj.student as Record<string, unknown> | undefined;
     if (!s || typeof s.id !== "string") return null;
 
     return {
         id: s.id,
-        firstName: s.firstName ?? "",
-        lastName: s.lastName ?? "",
-        username: s.username ?? "",
-        email: s.email ?? "",
+        firstName: typeof s.firstName === "string" ? s.firstName : "",
+        lastName: typeof s.lastName === "string" ? s.lastName : "",
+        username: typeof s.username === "string" ? s.username : "",
+        email: typeof s.email === "string" ? s.email : "",
     };
 }
 
-function normalizeAllocatedTutor(raw: any): UserLite | null {
-    const t = raw?.tutor ?? raw?.tutorUser ?? raw;
-    if (!t || typeof t.id !== "string") return null;
+function normalizeAllocatedTutor(raw: unknown): UserLite | null {
+    if (!raw || typeof raw !== "object") return null;
+
+    const obj = raw as Record<string, unknown>;
+    const t =
+        (obj.tutor as Record<string, unknown> | undefined) ??
+        (obj.tutorUser as Record<string, unknown> | undefined) ??
+        obj;
+
+    if (typeof t.id !== "string") return null;
 
     return {
         id: t.id,
-        firstName: t.firstName ?? "",
-        lastName: t.lastName ?? "",
-        username: t.username ?? "",
-        email: t.email ?? "",
+        firstName: typeof t.firstName === "string" ? t.firstName : "",
+        lastName: typeof t.lastName === "string" ? t.lastName : "",
+        username: typeof t.username === "string" ? t.username : "",
+        email: typeof t.email === "string" ? t.email : "",
     };
 }
 
@@ -98,7 +108,7 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
     const [allocatedTutors, setAllocatedTutors] = useState<UserLite[]>([]);
     const [userMap, setUserMap] = useState<Record<string, UserLite>>({});
 
-    async function loadMe(silent = false) {
+    async function loadMe(silent = false): Promise<Me | null> {
         const res = await fetch("/api/me");
         const data = await res.json().catch(() => ({}));
 
@@ -107,15 +117,17 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
             return null;
         }
 
-        setMe(data);
+        const currentUser = data as Me;
+        setMe(currentUser);
         setUserMap((prev) => ({
             ...prev,
-            [data.id]: data,
+            [currentUser.id]: currentUser,
         }));
-        return data as Me;
+
+        return currentUser;
     }
 
-    async function loadSidebarData(currentMe?: Me | null, silent = false) {
+    async function loadSidebarData(currentMe?: Me | null, silent = false): Promise<void> {
         const convRes = await fetch("/api/conversations?page=0&size=20");
         const convData = await convRes.json().catch(() => ({}));
 
@@ -124,7 +136,10 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
             return;
         }
 
-        const convList: Conversation[] = Array.isArray(convData) ? convData : convData?.content ?? [];
+        const convList: Conversation[] = Array.isArray(convData)
+            ? convData
+            : convData?.content ?? [];
+
         setConversations(convList);
 
         const meValue = currentMe ?? me;
@@ -144,16 +159,20 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
                 return;
             }
 
-            const students = (Array.isArray(stuData) ? stuData : stuData?.content ?? [])
+            const studentsRaw: unknown[] = Array.isArray(stuData)
+                ? stuData
+                : stuData?.content ?? [];
+
+            const students: UserLite[] = studentsRaw
                 .map(normalizeAllocatedStudent)
                 .filter((x): x is UserLite => x !== null);
 
             setAllocatedStudents(students);
 
-            setUserMap((prev) => {
+            setUserMap((prev: Record<string, UserLite>): Record<string, UserLite> => {
                 const next = { ...prev };
-                students.forEach((s) => {
-                    next[s.id] = s;
+                students.forEach((student: UserLite) => {
+                    next[student.id] = student;
                 });
                 return next;
             });
@@ -169,27 +188,33 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
             return;
         }
 
-        const tutors = (Array.isArray(tutorData) ? tutorData : tutorData?.content ?? [])
+        const tutorsRaw: unknown[] = Array.isArray(tutorData)
+            ? tutorData
+            : tutorData?.content ?? [];
+
+        const tutors: UserLite[] = tutorsRaw
             .map(normalizeAllocatedTutor)
             .filter((x): x is UserLite => x !== null);
 
         setAllocatedTutors(tutors);
 
-        setUserMap((prev) => {
+        setUserMap((prev: Record<string, UserLite>): Record<string, UserLite> => {
             const next = { ...prev };
-            tutors.forEach((t) => {
-                next[t.id] = t;
+            tutors.forEach((tutor: UserLite) => {
+                next[tutor.id] = tutor;
             });
             return next;
         });
     }
 
-    async function loadMessages(conversationId: string, silent = false) {
+    async function loadMessages(conversationId: string, silent = false): Promise<void> {
         if (!conversationId) return;
 
         setLoadingMessages(true);
 
-        const res = await fetch(`/api/conversations/${conversationId}/messages?page=0&size=50`);
+        const res = await fetch(
+            `/api/conversations/${conversationId}/messages?page=0&size=50`
+        );
         const data = await res.json().catch(() => ({}));
 
         if (!res.ok) {
@@ -207,7 +232,7 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
         }).catch(() => {});
     }
 
-    async function createConversationForTutor(studentUserId: string) {
+    async function createConversationForTutor(studentUserId: string): Promise<void> {
         if (!me?.id) {
             toast.error("Current tutor profile is not loaded yet.");
             return;
@@ -241,12 +266,12 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
         await loadSidebarData(undefined, true);
 
         if (data?.id) {
-            setSelectedConversationId(data.id);
-            await loadMessages(data.id);
+            setSelectedConversationId(data.id as string);
+            await loadMessages(data.id as string);
         }
     }
 
-    async function createConversationForStudent(tutorUserId: string) {
+    async function createConversationForStudent(tutorUserId: string): Promise<void> {
         if (!me?.id) {
             toast.error("Current student profile is not loaded yet.");
             return;
@@ -280,12 +305,12 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
         await loadSidebarData(undefined, true);
 
         if (data?.id) {
-            setSelectedConversationId(data.id);
-            await loadMessages(data.id);
+            setSelectedConversationId(data.id as string);
+            await loadMessages(data.id as string);
         }
     }
 
-    async function sendMessage() {
+    async function sendMessage(): Promise<void> {
         if (!selectedConversationId || !draft.trim()) return;
 
         const res = await fetch(`/api/conversations/${selectedConversationId}/messages`, {
@@ -317,14 +342,14 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
 
     useEffect(() => {
         if (!selectedConversationId) return;
-        loadMessages(selectedConversationId, true);
+        void loadMessages(selectedConversationId, true);
     }, [selectedConversationId]);
 
     useEffect(() => {
         const timer = setInterval(() => {
-            loadSidebarData(undefined, true);
+            void loadSidebarData(undefined, true);
             if (selectedConversationId) {
-                loadMessages(selectedConversationId, true);
+                void loadMessages(selectedConversationId, true);
             }
         }, 5000);
 
@@ -339,24 +364,24 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
         });
     }, [messages]);
 
-    const conversationTitle = (c: Conversation) => {
+    const conversationTitle = (conversation: Conversation) => {
         if (isTutor) {
-            const student = userMap[c.studentUserId ?? ""];
+            const student = userMap[conversation.studentUserId ?? ""];
             return student ? fullName(student) : "Student";
         }
 
-        const tutor = userMap[c.tutorUserId ?? ""];
+        const tutor = userMap[conversation.tutorUserId ?? ""];
         return tutor ? fullName(tutor) : "My Tutor";
     };
 
-    const conversationSubtitle = (c: Conversation) => {
+    const conversationSubtitle = (conversation: Conversation) => {
         if (isTutor) {
-            const student = userMap[c.studentUserId ?? ""];
-            return student?.email ?? (c.lastMessageAt ? formatTime(c.lastMessageAt) : "");
+            const student = userMap[conversation.studentUserId ?? ""];
+            return student?.email ?? (conversation.lastMessageAt ? formatTime(conversation.lastMessageAt) : "");
         }
 
-        const tutor = userMap[c.tutorUserId ?? ""];
-        return tutor?.email ?? (c.lastMessageAt ? formatTime(c.lastMessageAt) : "Tutor conversation");
+        const tutor = userMap[conversation.tutorUserId ?? ""];
+        return tutor?.email ?? (conversation.lastMessageAt ? formatTime(conversation.lastMessageAt) : "Tutor conversation");
     };
 
     return (
@@ -366,11 +391,13 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
                     {isTutor ? "Students" : "Tutors"}
                 </div>
 
-                <div className="max-h-162.5 overflow-auto">
+                <div className="max-h-[650px] overflow-auto">
                     {isTutor ? (
                         allocatedStudents.length > 0 ? (
                             allocatedStudents.map((student) => {
-                                const existing = conversations.find((c) => c.studentUserId === student.id);
+                                const existing = conversations.find(
+                                    (conversation) => conversation.studentUserId === student.id
+                                );
 
                                 return (
                                     <button
@@ -379,7 +406,7 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
                                             if (existing) {
                                                 setSelectedConversationId(existing.id);
                                             } else {
-                                                createConversationForTutor(student.id);
+                                                void createConversationForTutor(student.id);
                                             }
                                         }}
                                         className={`flex w-full flex-col border-b px-4 py-3 text-left hover:bg-slate-50 ${
@@ -392,11 +419,15 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
                                 );
                             })
                         ) : (
-                            <div className="p-4 text-sm text-muted-foreground">No allocated students.</div>
+                            <div className="p-4 text-sm text-muted-foreground">
+                                No allocated students.
+                            </div>
                         )
                     ) : allocatedTutors.length > 0 ? (
                         allocatedTutors.map((tutor) => {
-                            const existing = conversations.find((c) => c.tutorUserId === tutor.id);
+                            const existing = conversations.find(
+                                (conversation) => conversation.tutorUserId === tutor.id
+                            );
 
                             return (
                                 <button
@@ -405,7 +436,7 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
                                         if (existing) {
                                             setSelectedConversationId(existing.id);
                                         } else {
-                                            createConversationForStudent(tutor.id);
+                                            void createConversationForStudent(tutor.id);
                                         }
                                     }}
                                     className={`flex w-full flex-col border-b px-4 py-3 text-left hover:bg-slate-50 ${
@@ -418,45 +449,49 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
                             );
                         })
                     ) : conversations.length > 0 ? (
-                        conversations.map((c) => (
+                        conversations.map((conversation) => (
                             <button
-                                key={c.id}
-                                onClick={() => setSelectedConversationId(c.id)}
+                                key={conversation.id}
+                                onClick={() => setSelectedConversationId(conversation.id)}
                                 className={`flex w-full flex-col border-b px-4 py-3 text-left hover:bg-slate-50 ${
-                                    selectedConversationId === c.id ? "bg-slate-50" : ""
+                                    selectedConversationId === conversation.id ? "bg-slate-50" : ""
                                 }`}
                             >
-                                <span className="font-medium">{conversationTitle(c)}</span>
+                                <span className="font-medium">{conversationTitle(conversation)}</span>
                                 <span className="text-xs text-muted-foreground">
-                  {conversationSubtitle(c)}
+                  {conversationSubtitle(conversation)}
                 </span>
                             </button>
                         ))
                     ) : (
-                        <div className="p-4 text-sm text-muted-foreground">No tutor conversation yet.</div>
+                        <div className="p-4 text-sm text-muted-foreground">
+                            No tutor conversation yet.
+                        </div>
                     )}
                 </div>
             </div>
 
-            <div className="flex min-h-162.5 flex-col rounded-xl border bg-white">
+            <div className="flex min-h-[650px] flex-col rounded-xl border bg-white">
                 <div className="border-b px-4 py-3 font-medium">Chat</div>
 
                 <div className="flex-1 space-y-3 overflow-auto p-4">
                     {!selectedConversationId ? (
                         <div className="text-sm text-muted-foreground">
-                            {isTutor ? "Select a student to start chatting." : "Select your tutor to start chatting."}
+                            {isTutor
+                                ? "Select a student to start chatting."
+                                : "Select your tutor to start chatting."}
                         </div>
                     ) : loadingMessages ? (
                         <div className="text-sm text-muted-foreground">Loading messages...</div>
                     ) : sortedMessages.length > 0 ? (
-                        sortedMessages.map((m) => {
-                            const senderId = m.senderUserId;
+                        sortedMessages.map((message) => {
+                            const senderId = message.senderUserId;
                             const mine = Boolean(senderId && me?.id && senderId === me.id);
                             const sender = senderId ? userMap[senderId] : undefined;
 
                             return (
                                 <div
-                                    key={m.id}
+                                    key={message.id}
                                     className={`flex ${mine ? "justify-end" : "justify-start"}`}
                                 >
                                     <div
@@ -467,11 +502,17 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
                                         }`}
                                     >
                                         <div className="mb-1 text-[11px] opacity-70">
-                                            {mine ? "You" : sender ? fullName(sender) : isTutor ? "Student" : "Tutor"}
+                                            {mine
+                                                ? "You"
+                                                : sender
+                                                    ? fullName(sender)
+                                                    : isTutor
+                                                        ? "Student"
+                                                        : "Tutor"}
                                         </div>
-                                        <div className="text-sm">{m.body || m.content || ""}</div>
+                                        <div className="text-sm">{message.body || message.content || ""}</div>
                                         <div className="mt-1 text-[11px] opacity-70">
-                                            {formatTime(m.createdDate || m.createdAt)}
+                                            {formatTime(message.createdDate || message.createdAt)}
                                         </div>
                                     </div>
                                 </div>
@@ -490,12 +531,15 @@ export default function ChatRoom({ isTutor }: { isTutor: boolean }) {
                         onKeyDown={(e) => {
                             if (e.key === "Enter") {
                                 e.preventDefault();
-                                sendMessage();
+                                void sendMessage();
                             }
                         }}
                         disabled={!selectedConversationId}
                     />
-                    <Button onClick={sendMessage} disabled={!selectedConversationId || !draft.trim()}>
+                    <Button
+                        onClick={() => void sendMessage()}
+                        disabled={!selectedConversationId || !draft.trim()}
+                    >
                         Send
                     </Button>
                 </div>

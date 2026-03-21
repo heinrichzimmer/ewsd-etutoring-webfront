@@ -479,12 +479,12 @@ export default function StudentBlogDetailPage() {
 
                         <CardContent className="space-y-4">
                             <form onSubmit={onSubmitComment} className="space-y-3">
-                <textarea
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    placeholder="Write a comment..."
-                    className="min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                />
+                                <textarea
+                                    value={commentText}
+                                    onChange={(e) => setCommentText(e.target.value)}
+                                    placeholder="Write a comment..."
+                                    className="min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                                />
                                 <Button type="submit" disabled={submittingComment}>
                                     {submittingComment ? "Posting..." : "Post Comment"}
                                 </Button>

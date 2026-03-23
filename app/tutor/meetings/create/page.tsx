@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
@@ -24,8 +24,8 @@ type Student = {
 };
 
 type AllocationSlot = {
-    scheduleStart: string; // e.g. "21/03/2026 02:30"
-    scheduleEnd: string;   // e.g. "28/03/2026 02:30"
+    scheduleStart: string;
+    scheduleEnd: string;
 };
 
 type AllocatedStudent = {
@@ -33,30 +33,36 @@ type AllocatedStudent = {
     allocationSlots: AllocationSlot[];
 };
 
+type MeetingMode = "VIRTUAL" | "IN_PERSON";
+
 function fullName(u: Student) {
     return `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.username;
 }
 
 function isoToLocalInput(iso?: string | null) {
     if (!iso) return "";
+
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "";
+
     const pad = (n: number) => String(n).padStart(2, "0");
+
     const yyyy = d.getFullYear();
     const mm = pad(d.getMonth() + 1);
     const dd = pad(d.getDate());
     const hh = pad(d.getHours());
     const mi = pad(d.getMinutes());
+
     return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
 }
 
-// Backend slot format is dd/MM/yyyy HH:mm
-// Parse it as UTC to avoid timezone shifting bugs.
+// Backend slot format: dd/MM/yyyy HH:mm
 function backendSlotToUtcIso(value: string) {
     const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})$/);
     if (!match) return "";
 
     const [, dd, mm, yyyy, hh, min] = match;
+
     const utcMs = Date.UTC(
         Number(yyyy),
         Number(mm) - 1,
@@ -75,91 +81,129 @@ function formatSlotLabel(start: string, end: string) {
 }
 
 export default function TutorMeetingCreatePage() {
+    return (
+        <Suspense fallback={<div className="mx-auto max-w-4xl p-6">Loading...</div>}>
+            <TutorMeetingCreatePageContent />
+        </Suspense>
+    );
+}
+
+function TutorMeetingCreatePageContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const meetingId = searchParams.get("id");
+    const isEdit = Boolean(meetingId);
 
     const [allocatedStudents, setAllocatedStudents] = useState<AllocatedStudent[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [pageLoading, setPageLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
 
     const [studentUserId, setStudentUserId] = useState("");
     const [selectedSlotIndex, setSelectedSlotIndex] = useState("");
 
-    // display-only values for inputs
     const [startDate, setStartDate] = useState("");
     const [endDate, setEndDate] = useState("");
 
-    // real payload values (important)
     const [selectedSlotStartIso, setSelectedSlotStartIso] = useState("");
     const [selectedSlotEndIso, setSelectedSlotEndIso] = useState("");
 
-    const [mode, setMode] = useState<"VIRTUAL" | "IN_PERSON">("VIRTUAL");
+    const [mode, setMode] = useState<MeetingMode>("VIRTUAL");
     const [location, setLocation] = useState("Online");
     const [link, setLink] = useState("");
     const [description, setDescription] = useState("");
-
-    const isEdit = useMemo(() => Boolean(meetingId), [meetingId]);
 
     const selectedAllocatedStudent = useMemo(() => {
         return allocatedStudents.find((item) => item.student.id === studentUserId) ?? null;
     }, [allocatedStudents, studentUserId]);
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    const currentSlots = selectedAllocatedStudent?.allocationSlots ?? [];
+    const currentSlots = useMemo(() => {
+        return selectedAllocatedStudent?.allocationSlots ?? [];
+    }, [selectedAllocatedStudent]);
 
     useEffect(() => {
-        async function loadAllocatedStudents() {
-            const res = await fetch("/api/tutor/allocated-students");
-            const data = await res.json().catch(() => ({}));
+        let active = true;
 
-            if (!res.ok) {
-                toast.error(data?.message ?? "Failed to load allocated students");
-                return;
+        async function run() {
+            setPageLoading(true);
+
+            try {
+                const studentsPromise = fetch("/api/tutor/allocated-students", {
+                    cache: "no-store",
+                });
+
+                const meetingPromise = meetingId
+                    ? await fetch(`/api/tutor/meetings/${meetingId}`, {
+                        cache: "no-store",
+                    })
+                    : null;
+
+                const studentsRes = await studentsPromise;
+                const studentsData = await studentsRes.json().catch(() => ({}));
+
+                if (!studentsRes.ok) {
+                    throw new Error(studentsData?.message ?? "Failed to load allocated students");
+                }
+
+                if (active) {
+                    setAllocatedStudents(Array.isArray(studentsData) ? studentsData : []);
+                }
+
+                if (meetingPromise) {
+                    const meetingRes = await meetingPromise;
+                    const meetingData = await meetingRes.json().catch(() => ({}));
+
+                    if (!meetingRes.ok) {
+                        throw new Error(meetingData?.message ?? "Failed to load meeting");
+                    }
+
+                    if (active) {
+                        setStudentUserId(meetingData.studentUserId ?? "");
+                        setSelectedSlotStartIso(meetingData.startDate ?? "");
+                        setSelectedSlotEndIso(meetingData.endDate ?? "");
+                        setStartDate(isoToLocalInput(meetingData.startDate));
+                        setEndDate(isoToLocalInput(meetingData.endDate));
+                        setMode(meetingData.mode ?? "VIRTUAL");
+                        setLocation(
+                            meetingData.location ?? (meetingData.mode === "IN_PERSON" ? "" : "Online")
+                        );
+                        setLink(meetingData.link ?? "");
+                        setDescription(meetingData.description ?? "");
+                    }
+                }
+            } catch (error) {
+                if (active) {
+                    toast.error(
+                        error instanceof Error
+                            ? error.message
+                            : "Something went wrong while loading the page"
+                    );
+                }
+            } finally {
+                if (active) {
+                    setPageLoading(false);
+                }
             }
-
-            setAllocatedStudents(Array.isArray(data) ? data : []);
         }
 
-        async function loadMeeting() {
-            if (!meetingId) return;
+        void run();
 
-            const res = await fetch(`/api/tutor/meetings/${meetingId}`);
-            const data = await res.json().catch(() => ({}));
-
-            if (!res.ok) {
-                toast.error(data?.message ?? "Failed to load meeting");
-                return;
-            }
-
-            setStudentUserId(data.studentUserId ?? "");
-
-            // For edit mode, keep existing values
-            setSelectedSlotStartIso(data.startDate ?? "");
-            setSelectedSlotEndIso(data.endDate ?? "");
-            setStartDate(isoToLocalInput(data.startDate));
-            setEndDate(isoToLocalInput(data.endDate));
-
-            setMode(data.mode ?? "VIRTUAL");
-            setLocation(data.location ?? (data.mode === "IN_PERSON" ? "" : "Online"));
-            setLink(data.link ?? "");
-            setDescription(data.description ?? "");
-        }
-
-        loadAllocatedStudents();
-        loadMeeting();
+        return () => {
+            active = false;
+        };
     }, [meetingId]);
 
     useEffect(() => {
         if (mode === "IN_PERSON") {
             setLink("");
-            if (location === "Online") setLocation("");
-        } else {
-            if (!location) setLocation("Online");
+            if (location === "Online") {
+                setLocation("");
+            }
+        } else if (!location) {
+            setLocation("Online");
         }
     }, [mode, location]);
 
     useEffect(() => {
-        // reset slot/date when student changes in create mode
         setSelectedSlotIndex("");
 
         if (!isEdit) {
@@ -181,13 +225,11 @@ export default function TutorMeetingCreatePage() {
 
         setSelectedSlotStartIso(startIso);
         setSelectedSlotEndIso(endIso);
-
-        // display in local input, but submit the exact ISO above
         setStartDate(isoToLocalInput(startIso));
         setEndDate(isoToLocalInput(endIso));
     }, [selectedSlotIndex, currentSlots]);
 
-    async function onSubmit(e: React.FormEvent) {
+    async function onSubmit(e: FormEvent<HTMLFormElement>) {
         e.preventDefault();
 
         if (!studentUserId) {
@@ -210,11 +252,10 @@ export default function TutorMeetingCreatePage() {
             return;
         }
 
-        setLoading(true);
+        setSaving(true);
 
         const payload = {
             studentUserId,
-            // submit exact UTC values from selected slot
             startDate: selectedSlotStartIso,
             endDate: selectedSlotEndIso,
             mode,
@@ -243,8 +284,10 @@ export default function TutorMeetingCreatePage() {
             toast.success(isEdit ? "Meeting updated." : "Meeting created.");
             router.push("/tutor/meetings");
             router.refresh();
+        } catch {
+            toast.error("Failed to save meeting");
         } finally {
-            setLoading(false);
+            setSaving(false);
         }
     }
 
@@ -273,7 +316,11 @@ export default function TutorMeetingCreatePage() {
                                 <label className="text-sm font-medium">Select Student</label>
                                 <Select value={studentUserId} onValueChange={setStudentUserId}>
                                     <SelectTrigger className="w-full">
-                                        <SelectValue placeholder="Choose a student" />
+                                        <SelectValue
+                                            placeholder={
+                                                pageLoading ? "Loading students..." : "Choose a student"
+                                            }
+                                        />
                                     </SelectTrigger>
                                     <SelectContent>
                                         {allocatedStudents.map((item) => (
@@ -293,7 +340,7 @@ export default function TutorMeetingCreatePage() {
                                     </SelectTrigger>
                                     <SelectContent>
                                         {currentSlots.map((slot, index) => (
-                                            <SelectItem key={index} value={String(index)}>
+                                            <SelectItem key={`${slot.scheduleStart}-${slot.scheduleEnd}-${index}`} value={String(index)}>
                                                 {formatSlotLabel(slot.scheduleStart, slot.scheduleEnd)}
                                             </SelectItem>
                                         ))}
@@ -306,7 +353,10 @@ export default function TutorMeetingCreatePage() {
 
                             <div className="space-y-2">
                                 <label className="text-sm font-medium">Mode</label>
-                                <Select value={mode} onValueChange={(v) => setMode(v as "VIRTUAL" | "IN_PERSON")}>
+                                <Select
+                                    value={mode}
+                                    onValueChange={(value) => setMode(value as MeetingMode)}
+                                >
                                     <SelectTrigger className="w-full">
                                         <SelectValue />
                                     </SelectTrigger>
@@ -363,11 +413,16 @@ export default function TutorMeetingCreatePage() {
                         </div>
 
                         <div className="flex items-center gap-3">
-                            <Button type="submit" disabled={loading}>
-                                {loading ? "Saving..." : isEdit ? "Update Meeting" : "Save Meeting"}
+                            <Button type="submit" disabled={saving || pageLoading}>
+                                {saving ? "Saving..." : isEdit ? "Update Meeting" : "Save Meeting"}
                             </Button>
 
-                            <Button type="button" variant="secondary" onClick={() => router.push("/tutor/meetings")}>
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => router.push("/tutor/meetings")}
+                                disabled={saving}
+                            >
                                 Cancel
                             </Button>
                         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 
@@ -49,46 +49,75 @@ export default function TutorMeetingsPage() {
     const [meetings, setMeetings] = useState<Meeting[]>([]);
     const [students, setStudents] = useState<Student[]>([]);
     const [query, setQuery] = useState("");
+    const [loading, setLoading] = useState(true);
+    const [deletingId, setDeletingId] = useState<string | null>(null);
 
-    async function load() {
-        const [meetingsRes, studentsRes] = await Promise.all([
-            fetch("/api/tutor/meetings?page=0&size=20"),
-            fetch("/api/tutor/allocated-students"),
-        ]);
+    const loadData = useCallback(async () => {
+        try {
+            const [meetingsRes, studentsRes] = await Promise.all([
+                fetch("/api/tutor/meetings?page=0&size=20", {
+                    cache: "no-store",
+                }),
+                fetch("/api/tutor/allocated-students", {
+                    cache: "no-store",
+                }),
+            ]);
 
-        const meetingsData = await meetingsRes.json().catch(() => ({}));
-        const studentsData = await studentsRes.json().catch(() => ({}));
+            const meetingsData = await meetingsRes.json().catch(() => ({}));
+            const studentsData = await studentsRes.json().catch(() => ({}));
 
-        if (!meetingsRes.ok) {
-            toast.error(meetingsData?.message ?? "Failed to load meetings");
-            return;
+            if (!meetingsRes.ok) {
+                throw new Error(meetingsData?.message ?? "Failed to load meetings");
+            }
+
+            if (!studentsRes.ok) {
+                throw new Error(studentsData?.message ?? "Failed to load allocated students");
+            }
+
+            setMeetings(Array.isArray(meetingsData) ? meetingsData : meetingsData?.content ?? []);
+            setStudents(Array.isArray(studentsData) ? studentsData : studentsData?.content ?? []);
+        } catch (error) {
+            toast.error(
+                error instanceof Error ? error.message : "Something went wrong while loading data"
+            );
+        } finally {
+            setLoading(false);
         }
+    }, []);
 
-        if (!studentsRes.ok) {
-            toast.error(studentsData?.message ?? "Failed to load allocated students");
-            return;
-        }
-
-        setMeetings(Array.isArray(meetingsData) ? meetingsData : meetingsData?.content ?? []);
-        setStudents(Array.isArray(studentsData) ? studentsData : studentsData?.content ?? []);
+    async function refreshData() {
+        setLoading(true);
+        await loadData();
     }
 
     async function removeMeeting(id: string) {
-        const res = await fetch(`/api/tutor/meetings/${id}`, { method: "DELETE" });
+        try {
+            setDeletingId(id);
 
-        if (res.status === 204) {
-            toast.success("Meeting deleted.");
-            load();
-            return;
+            const res = await fetch(`/api/tutor/meetings/${id}`, {
+                method: "DELETE",
+            });
+
+            if (res.status === 204) {
+                toast.success("Meeting deleted.");
+                await refreshData();
+                return;
+            }
+
+            const data = await res.json().catch(() => ({}));
+            toast.error(data?.message ?? "Failed to delete meeting");
+        } catch {
+            toast.error("Failed to delete meeting");
+        } finally {
+            setDeletingId(null);
         }
-
-        const data = await res.json().catch(() => ({}));
-        toast.error(data?.message ?? "Failed to delete meeting");
     }
 
     useEffect(() => {
-        load();
-    }, []);
+        Promise.resolve().then(() => {
+            void loadData();
+        });
+    }, [loadData]);
 
     const studentById = useMemo(() => {
         const map = new Map<string, Student>();
@@ -142,61 +171,76 @@ export default function TutorMeetingsPage() {
                             </thead>
 
                             <tbody>
-                            {filtered.map((m) => {
-                                const student = studentById.get(m.studentUserId);
-
-                                return (
-                                    <tr key={m.id} className="border-b">
-                                        <td className="px-3 py-3">{formatDate(m.startDate)}</td>
-
-                                        <td className="px-3 py-3">
-                                            <div className="flex flex-col">
-                          <span className="font-medium">
-                            {student ? fullName(student) : m.studentUserId}
-                          </span>
-                                                {student?.email && (
-                                                    <span className="text-xs text-muted-foreground">{student.email}</span>
-                                                )}
-                                            </div>
-                                        </td>
-
-                                        <td className="px-3 py-3">{m.mode}</td>
-                                        <td className="px-3 py-3">{m.description ?? "-"}</td>
-
-                                        <td className="px-3 py-3">
-                                            {m.link ? (
-                                                <a
-                                                    href={m.link}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className="text-blue-600 underline"
-                                                >
-                                                    Join
-                                                </a>
-                                            ) : (
-                                                "-"
-                                            )}
-                                        </td>
-
-                                        <td className="space-x-2 px-3 py-3 text-right">
-                                            <Button asChild size="sm" variant="secondary">
-                                                <Link href={`/tutor/meetings/create?id=${m.id}`}>Edit</Link>
-                                            </Button>
-
-                                            <Button size="sm" variant="destructive" onClick={() => removeMeeting(m.id)}>
-                                                Delete
-                                            </Button>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-
-                            {filtered.length === 0 && (
+                            {loading ? (
+                                <tr>
+                                    <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">
+                                        Loading meetings...
+                                    </td>
+                                </tr>
+                            ) : filtered.length === 0 ? (
                                 <tr>
                                     <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">
                                         No meetings found.
                                     </td>
                                 </tr>
+                            ) : (
+                                filtered.map((m) => {
+                                    const student = studentById.get(m.studentUserId);
+
+                                    return (
+                                        <tr key={m.id} className="border-b">
+                                            <td className="px-3 py-3">{formatDate(m.startDate)}</td>
+
+                                            <td className="px-3 py-3">
+                                                <div className="flex flex-col">
+                                                        <span className="font-medium">
+                                                            {student ? fullName(student) : m.studentUserId}
+                                                        </span>
+                                                    {student?.email && (
+                                                        <span className="text-xs text-muted-foreground">
+                                                                {student.email}
+                                                            </span>
+                                                    )}
+                                                </div>
+                                            </td>
+
+                                            <td className="px-3 py-3">{m.mode}</td>
+                                            <td className="px-3 py-3">{m.description ?? "-"}</td>
+
+                                            <td className="px-3 py-3">
+                                                {m.link ? (
+                                                    <a
+                                                        href={m.link}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="text-blue-600 underline"
+                                                    >
+                                                        Join
+                                                    </a>
+                                                ) : (
+                                                    "-"
+                                                )}
+                                            </td>
+
+                                            <td className="space-x-2 px-3 py-3 text-right">
+                                                <Button asChild size="sm" variant="secondary">
+                                                    <Link href={`/tutor/meetings/create?id=${m.id}`}>
+                                                        Edit
+                                                    </Link>
+                                                </Button>
+
+                                                <Button
+                                                    size="sm"
+                                                    variant="destructive"
+                                                    disabled={deletingId === m.id}
+                                                    onClick={() => void removeMeeting(m.id)}
+                                                >
+                                                    {deletingId === m.id ? "Deleting..." : "Delete"}
+                                                </Button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
                             )}
                             </tbody>
                         </table>

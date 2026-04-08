@@ -76,7 +76,7 @@ export default function StudentListPage() {
 
                 <div className="flex items-center gap-2">
                     <Input
-                        className="w-[260px]"
+                        className="w-65"
                         placeholder="Search student..."
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}

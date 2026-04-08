@@ -11,20 +11,26 @@ async function safeJson(res: Response) {
 }
 
 export async function GET(
-    _: Request,
-    context: { params: Promise<{ id: string }> }
+    _req: Request,
+    { params }: { params: Promise<{ id: string }> }
 ) {
+    const { id } = await params;
+
     const cookieStore = await cookies();
     const token = cookieStore.get("access_token")?.value;
-    if (!token) return NextResponse.json({ message: "Unauthenticated" }, { status: 401 });
+    if (!token) {
+        return NextResponse.json({ message: "Unauthenticated" }, { status: 401 });
+    }
 
     const BACKEND = process.env.BACKEND_URL;
-    if (!BACKEND) return NextResponse.json({ message: "BACKEND_URL is not set" }, { status: 500 });
-
-    const { id } = await context.params;
+    if (!BACKEND) {
+        return NextResponse.json({ message: "BACKEND_URL is not set" }, { status: 500 });
+    }
 
     const res = await fetch(`${BACKEND}/api/tutor/meetings/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
         cache: "no-store",
     });
 
@@ -34,16 +40,21 @@ export async function GET(
 
 export async function PUT(
     req: Request,
-    context: { params: Promise<{ id: string }> }
+    { params }: { params: Promise<{ id: string }> }
 ) {
+    const { id } = await params;
+
     const cookieStore = await cookies();
     const token = cookieStore.get("access_token")?.value;
-    if (!token) return NextResponse.json({ message: "Unauthenticated" }, { status: 401 });
+    if (!token) {
+        return NextResponse.json({ message: "Unauthenticated" }, { status: 401 });
+    }
 
     const BACKEND = process.env.BACKEND_URL;
-    if (!BACKEND) return NextResponse.json({ message: "BACKEND_URL is not set" }, { status: 500 });
+    if (!BACKEND) {
+        return NextResponse.json({ message: "BACKEND_URL is not set" }, { status: 500 });
+    }
 
-    const { id } = await context.params;
     const body = await req.json().catch(() => ({}));
 
     const res = await fetch(`${BACKEND}/api/tutor/meetings/${id}`, {
@@ -55,26 +66,36 @@ export async function PUT(
         body: JSON.stringify(body),
     });
 
+    if (res.status === 204) {
+        return new NextResponse(null, { status: 204 });
+    }
+
     const data = await safeJson(res);
     return NextResponse.json(data, { status: res.status });
 }
 
 export async function DELETE(
-    _: Request,
-    context: { params: Promise<{ id: string }> }
+    _req: Request,
+    { params }: { params: Promise<{ id: string }> }
 ) {
+    const { id } = await params;
+
     const cookieStore = await cookies();
     const token = cookieStore.get("access_token")?.value;
-    if (!token) return NextResponse.json({ message: "Unauthenticated" }, { status: 401 });
+    if (!token) {
+        return NextResponse.json({ message: "Unauthenticated" }, { status: 401 });
+    }
 
     const BACKEND = process.env.BACKEND_URL;
-    if (!BACKEND) return NextResponse.json({ message: "BACKEND_URL is not set" }, { status: 500 });
-
-    const { id } = await context.params;
+    if (!BACKEND) {
+        return NextResponse.json({ message: "BACKEND_URL is not set" }, { status: 500 });
+    }
 
     const res = await fetch(`${BACKEND}/api/tutor/meetings/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
     });
 
     if (res.status === 204) {

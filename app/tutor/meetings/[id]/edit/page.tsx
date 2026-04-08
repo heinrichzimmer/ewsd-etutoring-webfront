@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,18 @@ type AllocatedStudentItem = {
 };
 
 type MeetingMode = "VIRTUAL" | "IN_PERSON";
+
+type Meeting = {
+    id: string;
+    studentUserId: string;
+    startDate: string;
+    endDate: string;
+    mode: MeetingMode;
+    location?: string | null;
+    link?: string | null;
+    description?: string | null;
+    virtualPlatform?: string | null;
+};
 
 function fullName(user?: Partial<User>) {
     if (!user) return "Unknown";
@@ -78,7 +90,7 @@ function formatDateForInput(date: Date) {
     return `${yyyy}-${mm}-${dd}`;
 }
 
-function formatTime(date: Date) {
+function formatTimeForInput(date: Date) {
     const hh = String(date.getHours()).padStart(2, "0");
     const mm = String(date.getMinutes()).padStart(2, "0");
     return `${hh}:${mm}`;
@@ -108,8 +120,49 @@ function makeTimeOptions(startMinutes = 9 * 60, endMinutes = 17 * 60, step = 30)
 const START_TIME_OPTIONS = makeTimeOptions(9 * 60, 16 * 60 + 30, 30);
 const END_TIME_OPTIONS = makeTimeOptions(9 * 60 + 30, 17 * 60, 30);
 
-export default function TutorMeetingCreatePage() {
+function normalizeMeeting(raw: unknown): Meeting | null {
+    if (!raw || typeof raw !== "object") return null;
+
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.id !== "string") return null;
+
+    const studentUserId =
+        typeof obj.studentUserId === "string"
+            ? obj.studentUserId
+            : typeof obj.studentId === "string"
+                ? obj.studentId
+                : "";
+
+    if (!studentUserId) return null;
+
+    return {
+        id: obj.id,
+        studentUserId,
+        startDate:
+            typeof obj.startDate === "string"
+                ? obj.startDate
+                : typeof obj.startTime === "string"
+                    ? obj.startTime
+                    : "",
+        endDate:
+            typeof obj.endDate === "string"
+                ? obj.endDate
+                : typeof obj.endTime === "string"
+                    ? obj.endTime
+                    : "",
+        mode: obj.mode === "IN_PERSON" ? "IN_PERSON" : "VIRTUAL",
+        location: typeof obj.location === "string" ? obj.location : null,
+        link: typeof obj.link === "string" ? obj.link : null,
+        description: typeof obj.description === "string" ? obj.description : null,
+        virtualPlatform:
+            typeof obj.virtualPlatform === "string" ? obj.virtualPlatform : null,
+    };
+}
+
+export default function TutorMeetingEditPage() {
     const router = useRouter();
+    const params = useParams<{ id: string }>();
+    const meetingId = params.id;
 
     const [loading, setLoading] = useState(true);
     const [students, setStudents] = useState<AllocatedStudentItem[]>([]);
@@ -121,59 +174,79 @@ export default function TutorMeetingCreatePage() {
     const [startTime, setStartTime] = useState("");
     const [endTime, setEndTime] = useState("");
 
-    const [location, setLocation] = useState("Online");
+    const [location, setLocation] = useState("");
     const [link, setLink] = useState("");
     const [description, setDescription] = useState("");
-
     const [virtualPlatform, setVirtualPlatform] = useState("GOOGLE_MEET");
 
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
-        async function loadAllocatedStudents() {
+        async function loadPage() {
             setLoading(true);
 
-            const res = await fetch("/api/tutor/allocated-students");
-            const data = await res.json().catch(() => ({}));
+            const [meetingRes, studentsRes] = await Promise.all([
+                fetch(`/api/tutor/meetings/${meetingId}`, { cache: "no-store" }),
+                fetch("/api/tutor/allocated-students", { cache: "no-store" }),
+            ]);
 
-            if (!res.ok) {
-                toast.error(data?.message ?? "Failed to load allocated students");
+            const meetingData = await meetingRes.json().catch(() => ({}));
+            const studentsData = await studentsRes.json().catch(() => ({}));
+
+            if (!meetingRes.ok) {
+                toast.error(meetingData?.message ?? "Failed to load meeting");
                 setLoading(false);
                 return;
             }
 
-            const list: AllocatedStudentItem[] = Array.isArray(data) ? data : data?.content ?? [];
-            setStudents(list);
+            if (!studentsRes.ok) {
+                toast.error(studentsData?.message ?? "Failed to load allocated students");
+                setLoading(false);
+                return;
+            }
+
+            const meeting = normalizeMeeting(meetingData);
+            if (!meeting) {
+                toast.error("Invalid meeting data.");
+                setLoading(false);
+                return;
+            }
+
+            const allocatedStudents: AllocatedStudentItem[] = Array.isArray(studentsData)
+                ? studentsData
+                : studentsData?.content ?? [];
+
+            setStudents(allocatedStudents);
+            setStudentUserId(meeting.studentUserId);
+            setMode(meeting.mode);
+            setLocation(meeting.location ?? "");
+            setLink(meeting.link ?? "");
+            setDescription(meeting.description ?? "");
+            setVirtualPlatform(meeting.virtualPlatform ?? "GOOGLE_MEET");
+
+            const start = parseDateFlexible(meeting.startDate);
+            const end = parseDateFlexible(meeting.endDate);
+
+            if (start) {
+                setMeetingDate(formatDateForInput(start));
+                setStartTime(formatTimeForInput(start));
+            }
+
+            if (end) {
+                setEndTime(formatTimeForInput(end));
+            }
+
             setLoading(false);
         }
 
-        void loadAllocatedStudents();
-    }, []);
+        void loadPage();
+    }, [meetingId]);
 
     const selectedStudentItem = useMemo(() => {
         return students.find((item) => item.student.id === studentUserId) ?? null;
     }, [students, studentUserId]);
 
     const selectedSlots = selectedStudentItem?.allocationSlots ?? [];
-
-    const dateBounds = useMemo(() => {
-        const parsed = selectedSlots
-            .map((slot) => ({
-                start: parseDateFlexible(slot.scheduleStart),
-                end: parseDateFlexible(slot.scheduleEnd),
-            }))
-            .filter((slot): slot is { start: Date; end: Date } => Boolean(slot.start && slot.end));
-
-        if (parsed.length === 0) return null;
-
-        const minDate = new Date(Math.min(...parsed.map((x) => x.start.getTime())));
-        const maxDate = new Date(Math.max(...parsed.map((x) => x.end.getTime())));
-
-        return {
-            min: formatDateForInput(minDate),
-            max: formatDateForInput(maxDate),
-        };
-    }, [selectedSlots]);
 
     const availableRanges = useMemo(() => {
         return selectedSlots
@@ -191,10 +264,16 @@ export default function TutorMeetingCreatePage() {
             .filter((x): x is { start: Date; end: Date; label: string } => x !== null);
     }, [selectedSlots]);
 
-    const allowedDateMessage = useMemo(() => {
-        if (availableRanges.length === 0) return "No allocation slots found for this student.";
-        if (availableRanges.length === 1) return `Allowed range: ${availableRanges[0].label}`;
-        return `Allowed ranges: ${availableRanges.map((x) => x.label).join(" | ")}`;
+    const dateBounds = useMemo(() => {
+        if (availableRanges.length === 0) return null;
+
+        const minDate = new Date(Math.min(...availableRanges.map((x) => x.start.getTime())));
+        const maxDate = new Date(Math.max(...availableRanges.map((x) => x.end.getTime())));
+
+        return {
+            min: formatDateForInput(minDate),
+            max: formatDateForInput(maxDate),
+        };
     }, [availableRanges]);
 
     function isWithinWorkingHours(start: string, end: string) {
@@ -223,13 +302,8 @@ export default function TutorMeetingCreatePage() {
             return;
         }
 
-        if (!meetingDate) {
-            toast.error("Please choose a meeting date.");
-            return;
-        }
-
-        if (!startTime || !endTime) {
-            toast.error("Please choose start and end time.");
+        if (!meetingDate || !startTime || !endTime) {
+            toast.error("Please choose date and time.");
             return;
         }
 
@@ -243,6 +317,14 @@ export default function TutorMeetingCreatePage() {
             return;
         }
 
+        const payload: Record<string, unknown> = {
+            studentUserId,
+            startDate: buildLocalIso(meetingDate, startTime),
+            endDate: buildLocalIso(meetingDate, endTime),
+            mode,
+            description: description.trim(),
+        };
+
         if (mode === "VIRTUAL") {
             if (!link.trim()) {
                 toast.error("Please enter the meeting link.");
@@ -253,35 +335,23 @@ export default function TutorMeetingCreatePage() {
                 toast.error("Please choose the virtual platform.");
                 return;
             }
+
+            payload.link = link.trim();
+            payload.virtualPlatform = virtualPlatform;
         } else {
             if (!location.trim()) {
                 toast.error("Please enter the meeting location.");
                 return;
             }
-        }
 
-        const payload: Record<string, unknown> = {
-            studentUserId,
-            startDate: buildLocalIso(meetingDate, startTime),
-            endDate: buildLocalIso(meetingDate, endTime),
-            mode,
-            description: description.trim(),
-        };
-
-        if (mode === "VIRTUAL") {
-            payload.link = link.trim();
-            payload.virtualPlatform = virtualPlatform;
-        } else {
             payload.location = location.trim();
         }
-
-
 
         setSubmitting(true);
 
         try {
-            const res = await fetch("/api/tutor/meetings", {
-                method: "POST",
+            const res = await fetch(`/api/tutor/meetings/${meetingId}`, {
+                method: "PUT",
                 headers: {
                     "Content-Type": "application/json",
                 },
@@ -291,11 +361,11 @@ export default function TutorMeetingCreatePage() {
             const data = await res.json().catch(() => ({}));
 
             if (!res.ok) {
-                toast.error(data?.message ?? "Failed to create meeting");
+                toast.error(data?.message ?? "Failed to update meeting");
                 return;
             }
 
-            toast.success("Meeting created successfully.");
+            toast.success("Meeting updated successfully.");
             router.push("/tutor/meetings");
             router.refresh();
         } finally {
@@ -315,15 +385,15 @@ export default function TutorMeetingCreatePage() {
     return (
         <div className="mx-auto max-w-4xl space-y-6">
             <div>
-                <h1 className="text-2xl font-semibold">Schedule New Meeting</h1>
+                <h1 className="text-2xl font-semibold">Edit Meeting</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                    Choose a student, then select a date inside their allocation range and a time within working hours.
+                    Update the meeting while staying inside the student&#39;s allocated range and working hours.
                 </p>
             </div>
 
             <Card className="shadow-sm">
                 <CardHeader>
-                    <CardTitle className="text-lg">Create Meeting</CardTitle>
+                    <CardTitle className="text-lg">Update Meeting</CardTitle>
                 </CardHeader>
 
                 <CardContent>
@@ -342,10 +412,6 @@ export default function TutorMeetingCreatePage() {
                                     ))}
                                 </SelectContent>
                             </Select>
-
-                            {studentUserId && (
-                                <p className="text-xs text-muted-foreground">{allowedDateMessage}</p>
-                            )}
                         </div>
 
                         <div className="space-y-2">
@@ -388,7 +454,6 @@ export default function TutorMeetingCreatePage() {
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                <p className="text-xs text-muted-foreground">Working hours only: 09:00–17:00</p>
                             </div>
 
                             <div className="space-y-2">
@@ -427,9 +492,6 @@ export default function TutorMeetingCreatePage() {
                                                 <SelectItem value="OTHER">Other</SelectItem>
                                             </SelectContent>
                                         </Select>
-                                        <p className="text-xs text-muted-foreground">
-                                            Choose the platform for the virtual meeting.
-                                        </p>
                                     </div>
 
                                     <div className="space-y-2">
@@ -482,12 +544,14 @@ export default function TutorMeetingCreatePage() {
                             />
                         </div>
 
-                        {selectedStudentItem && (
+                        {selectedSlots.length > 0 && (
                             <div className="rounded-md border bg-slate-50 p-4">
                                 <div className="mb-2 text-sm font-medium">Available Allocation Ranges</div>
                                 <div className="space-y-1 text-sm text-muted-foreground">
-                                    {availableRanges.map((range, index) => (
-                                        <div key={`${range.label}-${index}`}>{range.label}</div>
+                                    {selectedSlots.map((slot, index) => (
+                                        <div key={`${slot.scheduleStart}-${slot.scheduleEnd}-${index}`}>
+                                            {formatDateTime(slot.scheduleStart)} → {formatDateTime(slot.scheduleEnd)}
+                                        </div>
                                     ))}
                                 </div>
                             </div>
@@ -495,7 +559,7 @@ export default function TutorMeetingCreatePage() {
 
                         <div className="flex items-center gap-3">
                             <Button type="submit" disabled={submitting || loading}>
-                                {submitting ? "Saving..." : "Save Meeting"}
+                                {submitting ? "Saving..." : "Save Changes"}
                             </Button>
 
                             <Button

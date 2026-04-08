@@ -17,6 +17,7 @@ type Meeting = {
     location?: string | null;
     link?: string | null;
     description?: string | null;
+    virtualPlatform?: string | null;
     status?: string;
 };
 
@@ -26,6 +27,14 @@ type Student = {
     firstName: string;
     lastName: string;
     email: string;
+};
+
+type AllocatedStudentItem = {
+    student: Student;
+    allocationSlots?: Array<{
+        scheduleStart: string;
+        scheduleEnd: string;
+    }>;
 };
 
 function fullName(u: Student) {
@@ -45,6 +54,66 @@ function formatDate(value: string) {
     });
 }
 
+function normalizeStudent(raw: unknown): Student | null {
+    if (!raw || typeof raw !== "object") return null;
+
+    const obj = raw as Record<string, unknown>;
+    const nested =
+        (obj.student as Record<string, unknown> | undefined) ??
+        obj;
+
+    if (typeof nested.id !== "string") return null;
+
+    return {
+        id: nested.id,
+        username: typeof nested.username === "string" ? nested.username : "",
+        firstName: typeof nested.firstName === "string" ? nested.firstName : "",
+        lastName: typeof nested.lastName === "string" ? nested.lastName : "",
+        email: typeof nested.email === "string" ? nested.email : "",
+    };
+}
+
+function normalizeMeeting(raw: unknown): Meeting | null {
+    if (!raw || typeof raw !== "object") return null;
+
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.id !== "string") return null;
+
+    const studentUserId =
+        typeof obj.studentUserId === "string"
+            ? obj.studentUserId
+            : typeof obj.studentId === "string"
+                ? obj.studentId
+                : "";
+
+    if (!studentUserId) return null;
+
+    return {
+        id: obj.id,
+        studentUserId,
+        startDate:
+            typeof obj.startDate === "string"
+                ? obj.startDate
+                : typeof obj.startTime === "string"
+                    ? obj.startTime
+                    : "",
+        endDate:
+            typeof obj.endDate === "string"
+                ? obj.endDate
+                : typeof obj.endTime === "string"
+                    ? obj.endTime
+                    : "",
+        mode:
+            obj.mode === "IN_PERSON" ? "IN_PERSON" : "VIRTUAL",
+        location: typeof obj.location === "string" ? obj.location : null,
+        link: typeof obj.link === "string" ? obj.link : null,
+        description: typeof obj.description === "string" ? obj.description : null,
+        virtualPlatform:
+            typeof obj.virtualPlatform === "string" ? obj.virtualPlatform : null,
+        status: typeof obj.status === "string" ? obj.status : undefined,
+    };
+}
+
 export default function TutorMeetingsPage() {
     const [meetings, setMeetings] = useState<Meeting[]>([]);
     const [students, setStudents] = useState<Student[]>([]);
@@ -55,7 +124,7 @@ export default function TutorMeetingsPage() {
     const loadData = useCallback(async () => {
         try {
             const [meetingsRes, studentsRes] = await Promise.all([
-                fetch("/api/tutor/meetings?page=0&size=20", {
+                fetch("/api/tutor/meetings?page=0&size=50", {
                     cache: "no-store",
                 }),
                 fetch("/api/tutor/allocated-students", {
@@ -74,8 +143,25 @@ export default function TutorMeetingsPage() {
                 throw new Error(studentsData?.message ?? "Failed to load allocated students");
             }
 
-            setMeetings(Array.isArray(meetingsData) ? meetingsData : meetingsData?.content ?? []);
-            setStudents(Array.isArray(studentsData) ? studentsData : studentsData?.content ?? []);
+            const rawMeetings: unknown[] = Array.isArray(meetingsData)
+                ? meetingsData
+                : meetingsData?.content ?? [];
+
+            const rawStudents: unknown[] = Array.isArray(studentsData)
+                ? studentsData
+                : studentsData?.content ?? [];
+
+            setMeetings(
+                rawMeetings
+                    .map(normalizeMeeting)
+                    .filter((x): x is Meeting => x !== null)
+            );
+
+            setStudents(
+                rawStudents
+                    .map(normalizeStudent)
+                    .filter((x): x is Student => x !== null)
+            );
         } catch (error) {
             toast.error(
                 error instanceof Error ? error.message : "Something went wrong while loading data"
@@ -129,7 +215,7 @@ export default function TutorMeetingsPage() {
         const student = studentById.get(m.studentUserId);
         const studentName = student ? fullName(student) : m.studentUserId;
 
-        return `${studentName} ${student?.email ?? ""} ${m.description ?? ""} ${m.mode}`
+        return `${studentName} ${student?.email ?? ""} ${m.description ?? ""} ${m.mode} ${m.virtualPlatform ?? ""}`
             .toLowerCase()
             .includes(query.toLowerCase());
     });
@@ -189,22 +275,39 @@ export default function TutorMeetingsPage() {
 
                                     return (
                                         <tr key={m.id} className="border-b">
-                                            <td className="px-3 py-3">{formatDate(m.startDate)}</td>
+                                            <td className="px-3 py-3">
+                                                <div className="flex flex-col">
+                                                    <span>{formatDate(m.startDate)}</span>
+                                                    <span className="text-xs text-muted-foreground">
+                              to {formatDate(m.endDate)}
+                            </span>
+                                                </div>
+                                            </td>
 
                                             <td className="px-3 py-3">
                                                 <div className="flex flex-col">
-                                                        <span className="font-medium">
-                                                            {student ? fullName(student) : m.studentUserId}
-                                                        </span>
+                            <span className="font-medium">
+                              {student ? fullName(student) : m.studentUserId}
+                            </span>
                                                     {student?.email && (
                                                         <span className="text-xs text-muted-foreground">
-                                                                {student.email}
-                                                            </span>
+                                {student.email}
+                              </span>
                                                     )}
                                                 </div>
                                             </td>
 
-                                            <td className="px-3 py-3">{m.mode}</td>
+                                            <td className="px-3 py-3">
+                                                <div className="flex flex-col">
+                                                    <span>{m.mode}</span>
+                                                    {m.virtualPlatform ? (
+                                                        <span className="text-xs text-muted-foreground">
+                                {m.virtualPlatform}
+                              </span>
+                                                    ) : null}
+                                                </div>
+                                            </td>
+
                                             <td className="px-3 py-3">{m.description ?? "-"}</td>
 
                                             <td className="px-3 py-3">
@@ -224,7 +327,7 @@ export default function TutorMeetingsPage() {
 
                                             <td className="space-x-2 px-3 py-3 text-right">
                                                 <Button asChild size="sm" variant="secondary">
-                                                    <Link href={`/tutor/meetings/create?id=${m.id}`}>
+                                                    <Link href={`/tutor/meetings/${m.id}/edit`}>
                                                         Edit
                                                     </Link>
                                                 </Button>

@@ -21,26 +21,36 @@ type Blog = {
     audienceLabel: string;
 };
 
+const ITEMS_PER_PAGE = 5;
+
 function normalizeBlog(raw: any): Blog | null {
     if (!raw || typeof raw !== "object") return null;
     if (typeof raw.id !== "string") return null;
 
     const attachments =
-        Array.isArray(raw.attachments) ? raw.attachments.length :
-            typeof raw.attachmentsCount === "number" ? raw.attachmentsCount :
-                typeof raw.attachmentCount === "number" ? raw.attachmentCount :
-                    0;
+        Array.isArray(raw.attachments)
+            ? raw.attachments.length
+            : typeof raw.attachmentsCount === "number"
+                ? raw.attachmentsCount
+                : typeof raw.attachmentCount === "number"
+                    ? raw.attachmentCount
+                    : 0;
 
     const comments =
-        Array.isArray(raw.comments) ? raw.comments.length :
-            typeof raw.commentsCount === "number" ? raw.commentsCount :
-                typeof raw.commentCount === "number" ? raw.commentCount :
-                    0;
+        Array.isArray(raw.comments)
+            ? raw.comments.length
+            : typeof raw.commentsCount === "number"
+                ? raw.commentsCount
+                : typeof raw.commentCount === "number"
+                    ? raw.commentCount
+                    : 0;
 
     const targetStudentIds =
-        Array.isArray(raw.targetStudentIds) ? raw.targetStudentIds :
-            Array.isArray(raw.targetStudents) ? raw.targetStudents :
-                [];
+        Array.isArray(raw.targetStudentIds)
+            ? raw.targetStudentIds
+            : Array.isArray(raw.targetStudents)
+                ? raw.targetStudents
+                : [];
 
     const allStudents =
         raw.allStudents === true ||
@@ -81,6 +91,7 @@ export default function TutorBlogsPage() {
     const [blogs, setBlogs] = useState<Blog[]>([]);
     const [query, setQuery] = useState("");
     const [loading, setLoading] = useState(true);
+    const [currentPage, setCurrentPage] = useState(1);
 
     async function loadBlogs() {
         setLoading(true);
@@ -104,8 +115,12 @@ export default function TutorBlogsPage() {
     }
 
     useEffect(() => {
-        loadBlogs();
+        void loadBlogs();
     }, []);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [query]);
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -113,6 +128,19 @@ export default function TutorBlogsPage() {
 
         return blogs.filter((blog) => blog.body.toLowerCase().includes(q));
     }, [blogs, query]);
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
+        }
+    }, [currentPage, totalPages]);
+
+    const paginatedBlogs = useMemo(() => {
+        const start = (currentPage - 1) * ITEMS_PER_PAGE;
+        return filtered.slice(start, start + ITEMS_PER_PAGE);
+    }, [filtered, currentPage]);
 
     return (
         <div className="space-y-4">
@@ -129,9 +157,9 @@ export default function TutorBlogsPage() {
                 </Button>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <Input
-                    className="max-w-sm"
+                    className="w-full sm:max-w-sm"
                     placeholder="Search blogs..."
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
@@ -154,46 +182,74 @@ export default function TutorBlogsPage() {
                     </CardContent>
                 </Card>
             ) : (
-                <div className="space-y-4">
-                    {filtered.map((blog) => (
-                        <Card key={blog.id} className="shadow-sm">
-                            <CardContent className="space-y-4 pt-6">
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <Badge variant="outline">{blog.audienceLabel}</Badge>
-                                    {blog.attachmentsCount > 0 && (
+                <>
+                    <div className="space-y-4">
+                        {paginatedBlogs.map((blog) => (
+                            <Card key={blog.id} className="shadow-sm">
+                                <CardContent className="space-y-4 pt-6">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <Badge variant="outline">{blog.audienceLabel}</Badge>
+                                        {blog.attachmentsCount > 0 && (
+                                            <Badge variant="secondary">
+                                                {blog.attachmentsCount} attachment{blog.attachmentsCount === 1 ? "" : "s"}
+                                            </Badge>
+                                        )}
                                         <Badge variant="secondary">
-                                            {blog.attachmentsCount} attachment{blog.attachmentsCount === 1 ? "" : "s"}
+                                            {blog.commentsCount} comment{blog.commentsCount === 1 ? "" : "s"}
                                         </Badge>
-                                    )}
-                                    <Badge variant="secondary">
-                                        {blog.commentsCount} comment{blog.commentsCount === 1 ? "" : "s"}
-                                    </Badge>
-                                </div>
-
-                                <div className="text-sm leading-6 text-slate-800">
-                                    {truncate(blog.body)}
-                                </div>
-
-                                <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-                                    <div>
-                                        Created: {formatDate(blog.createdAt)}
-                                        {blog.updatedAt && ` • Updated: ${formatDate(blog.updatedAt)}`}
                                     </div>
 
-                                    <div className="flex gap-2">
-                                        <Button asChild size="sm" variant="secondary">
-                                            <Link href={`/tutor/blogs/${blog.id}`}>View</Link>
-                                        </Button>
-
-                                        <Button asChild size="sm">
-                                            <Link href={`/tutor/blogs/${blog.id}/edit`}>Edit</Link>
-                                        </Button>
+                                    <div className="text-sm leading-6 text-slate-800">
+                                        {truncate(blog.body)}
                                     </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
+
+                                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                                        <div>
+                                            Created: {formatDate(blog.createdAt)}
+                                            {blog.updatedAt && ` • Updated: ${formatDate(blog.updatedAt)}`}
+                                        </div>
+
+                                        <div className="flex gap-2">
+                                            <Button asChild size="sm" variant="secondary">
+                                                <Link href={`/tutor/blogs/${blog.id}`}>View</Link>
+                                            </Button>
+
+                                            <Button asChild size="sm">
+                                                <Link href={`/tutor/blogs/${blog.id}/edit`}>Edit</Link>
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+
+                    <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="text-sm text-muted-foreground">
+                            Page {currentPage} of {totalPages}
+                        </div>
+
+                        <div className="flex gap-2">
+                            <Button
+                                variant="secondary"
+                                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                                disabled={currentPage === 1}
+                                className="w-full sm:w-auto"
+                            >
+                                Previous
+                            </Button>
+
+                            <Button
+                                variant="secondary"
+                                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                                disabled={currentPage === totalPages}
+                                className="w-full sm:w-auto"
+                            >
+                                Next
+                            </Button>
+                        </div>
+                    </div>
+                </>
             )}
         </div>
     );

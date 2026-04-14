@@ -119,8 +119,69 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    box-sizing: border-box;
   }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     @apply bg-background text-foreground;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  img,
+  svg,
+  video,
+  canvas {
+    max-width: 100%;
+    height: auto;
+  }
+
+  textarea {
+    resize: vertical;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  main,
+  section,
+  article,
+  aside,
+  header,
+  footer {
+    min-width: 0;
+  }
+}
+
+@layer utilities {
+  .touch-scroll {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .safe-page {
+    @apply min-w-0 p-4 sm:p-6;
+  }
+
+  .safe-card-grid {
+    @apply grid gap-4 sm:grid-cols-2 xl:grid-cols-3;
+  }
+
+  .safe-table-wrap {
+    @apply overflow-x-auto rounded-lg border bg-white;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 640px) {
+  html {
+    font-size: 15px;
   }
 }

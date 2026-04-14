@@ -7,7 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-
 import {
     Table,
     TableBody,
@@ -24,6 +23,8 @@ type User = {
     lastName?: string;
     email: string;
     role?: string;
+    isActive?: boolean;
+    isLocked?: boolean;
 };
 
 function fullName(u: User) {
@@ -42,12 +43,11 @@ export default function TutorListPage() {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch("/api/staff/tutors");
+            const res = await fetch("/api/staff/tutors", { cache: "no-store" });
             const data = await res.json().catch(() => ({}));
 
             if (!res.ok) throw new Error(data?.message ?? "Failed to load tutors");
 
-            // Support both: array OR {content: []}
             const list = Array.isArray(data) ? data : data?.content ?? [];
             setTutors(list);
         } catch (e: any) {
@@ -58,12 +58,13 @@ export default function TutorListPage() {
     }
 
     useEffect(() => {
-        load();
+        void load();
     }, []);
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         if (!q) return tutors;
+
         return tutors.filter((t) => {
             const text = `${fullName(t)} ${t.username ?? ""} ${t.email ?? ""}`.toLowerCase();
             return text.includes(q);
@@ -77,7 +78,7 @@ export default function TutorListPage() {
 
                 <div className="flex items-center gap-2">
                     <Input
-                        className="w-[260px]"
+                        className="w-65"
                         placeholder="Search tutor..."
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
@@ -91,7 +92,7 @@ export default function TutorListPage() {
 
             {error && <p className="text-sm text-red-600">{error}</p>}
 
-            <Card>
+            <Card className="shadow-sm">
                 <CardHeader>
                     <CardTitle className="text-base">Tutors</CardTitle>
                 </CardHeader>
@@ -104,10 +105,11 @@ export default function TutorListPage() {
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead className="w-[60px]">No</TableHead>
+                                        <TableHead className="w-15">No</TableHead>
                                         <TableHead>Name</TableHead>
                                         <TableHead>Username</TableHead>
                                         <TableHead>Email</TableHead>
+                                        <TableHead>Status</TableHead>
                                         <TableHead className="text-right">Action</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -119,9 +121,18 @@ export default function TutorListPage() {
                                             <TableCell className="font-medium">{fullName(t)}</TableCell>
                                             <TableCell>{t.username ?? "-"}</TableCell>
                                             <TableCell>{t.email}</TableCell>
+                                            <TableCell>
+                                                {t.isLocked ? (
+                                                    <Badge variant="destructive">Locked</Badge>
+                                                ) : t.isActive === false ? (
+                                                    <Badge variant="secondary">Inactive</Badge>
+                                                ) : (
+                                                    <Badge>Active</Badge>
+                                                )}
+                                            </TableCell>
                                             <TableCell className="text-right">
-                                                <Button size="sm" variant="secondary" onClick={() => alert(`Tutor: ${fullName(t)}`)}>
-                                                    View
+                                                <Button asChild size="sm" variant="secondary">
+                                                    <Link href={`/staff/users/${t.id}`}>View</Link>
                                                 </Button>
                                             </TableCell>
                                         </TableRow>
@@ -129,7 +140,7 @@ export default function TutorListPage() {
 
                                     {filtered.length === 0 && (
                                         <TableRow>
-                                            <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                                            <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                                                 No tutors found.
                                             </TableCell>
                                         </TableRow>

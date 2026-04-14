@@ -21,6 +21,8 @@ type Assignment = {
     attachments: Attachment[];
 };
 
+const ITEMS_PER_PAGE = 5;
+
 function normalizeAttachment(raw: unknown): Attachment | null {
     if (!raw || typeof raw !== "object") return null;
     const obj = raw as Record<string, unknown>;
@@ -81,6 +83,7 @@ export default function TutorFilesPage() {
     const [assignments, setAssignments] = useState<Assignment[]>([]);
     const [search, setSearch] = useState("");
     const [loading, setLoading] = useState(true);
+    const [currentPage, setCurrentPage] = useState(1);
 
     useEffect(() => {
         async function load() {
@@ -107,6 +110,10 @@ export default function TutorFilesPage() {
         void load();
     }, []);
 
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [search]);
+
     const filtered = useMemo(() => {
         const q = search.trim().toLowerCase();
         if (!q) return assignments;
@@ -117,6 +124,19 @@ export default function TutorFilesPage() {
                 assignment.instructions.toLowerCase().includes(q)
         );
     }, [assignments, search]);
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
+        }
+    }, [currentPage, totalPages]);
+
+    const paginatedAssignments = useMemo(() => {
+        const start = (currentPage - 1) * ITEMS_PER_PAGE;
+        return filtered.slice(start, start + ITEMS_PER_PAGE);
+    }, [filtered, currentPage]);
 
     return (
         <div className="space-y-4">
@@ -137,7 +157,7 @@ export default function TutorFilesPage() {
                 placeholder="Search assignments..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="max-w-sm"
+                className="w-full sm:max-w-sm"
             />
 
             <Card className="shadow-sm">
@@ -145,37 +165,65 @@ export default function TutorFilesPage() {
                     <CardTitle className="text-base">Assignment List</CardTitle>
                 </CardHeader>
 
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-4">
                     {loading ? (
                         <div className="text-sm text-muted-foreground">Loading assignments...</div>
                     ) : filtered.length === 0 ? (
                         <div className="text-sm text-muted-foreground">No assignments found.</div>
                     ) : (
-                        filtered.map((assignment) => (
-                            <div
-                                key={assignment.id}
-                                className="rounded-lg border bg-slate-50 p-4"
-                            >
-                                <div className="flex flex-wrap items-start justify-between gap-3">
-                                    <div>
-                                        <div className="font-medium">{assignment.title}</div>
-                                        <div className="mt-1 text-sm text-muted-foreground">
-                                            Due: {assignment.dueDate ?? "-"}
+                        <>
+                            {paginatedAssignments.map((assignment) => (
+                                <div
+                                    key={assignment.id}
+                                    className="rounded-lg border bg-slate-50 p-4"
+                                >
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <div>
+                                            <div className="font-medium">{assignment.title}</div>
+                                            <div className="mt-1 text-sm text-muted-foreground">
+                                                Due: {assignment.dueDate ?? "-"}
+                                            </div>
                                         </div>
+
+                                        <Button asChild size="sm" variant="secondary">
+                                            <Link href={`/tutor/files/${assignment.id}`}>Open</Link>
+                                        </Button>
                                     </div>
 
-                                    <Button asChild size="sm" variant="secondary">
-                                        <Link href={`/tutor/files/${assignment.id}`}>Open</Link>
-                                    </Button>
+                                    {assignment.instructions ? (
+                                        <div className="mt-3 text-sm line-clamp-2">
+                                            {assignment.instructions}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ))}
+
+                            <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="text-sm text-muted-foreground">
+                                    Page {currentPage} of {totalPages}
                                 </div>
 
-                                {assignment.instructions ? (
-                                    <div className="mt-3 text-sm line-clamp-2">
-                                        {assignment.instructions}
-                                    </div>
-                                ) : null}
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant="secondary"
+                                        onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                                        disabled={currentPage === 1}
+                                        className="w-full sm:w-auto"
+                                    >
+                                        Previous
+                                    </Button>
+
+                                    <Button
+                                        variant="secondary"
+                                        onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                                        disabled={currentPage === totalPages}
+                                        className="w-full sm:w-auto"
+                                    >
+                                        Next
+                                    </Button>
+                                </div>
                             </div>
-                        ))
+                        </>
                     )}
                 </CardContent>
             </Card>

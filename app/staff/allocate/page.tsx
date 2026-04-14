@@ -66,6 +66,8 @@ type PreviewItem = {
     [key: string]: any;
 };
 
+const ITEMS_PER_PAGE = 5;
+
 function fullName(u: User) {
     return `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.username;
 }
@@ -87,6 +89,24 @@ function formatPreviewDateTime(value: string) {
     });
 }
 
+function formatScheduleRange(start?: string, end?: string) {
+    if (!start || !end) return "-";
+    return `${formatPreviewDateTime(start)} → ${formatPreviewDateTime(end)}`;
+}
+
+function addMinutesToTime(time: string, minutesToAdd: number) {
+    if (!time) return "";
+    const [hours, minutes] = time.split(":").map(Number);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return "";
+
+    const total = hours * 60 + minutes + minutesToAdd;
+    const normalized = ((total % (24 * 60)) + (24 * 60)) % (24 * 60);
+
+    const hh = String(Math.floor(normalized / 60)).padStart(2, "0");
+    const mm = String(normalized % 60).padStart(2, "0");
+    return `${hh}:${mm}`;
+}
+
 export default function AllocatePage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -96,8 +116,8 @@ export default function AllocatePage() {
     const [allocations, setAllocations] = useState<Allocation[]>([]);
 
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [currentPage, setCurrentPage] = useState(1);
 
-    // Single dialog
     const [singleOpen, setSingleOpen] = useState(false);
     const [singleStudentId, setSingleStudentId] = useState<string | null>(null);
     const [singleTutorId, setSingleTutorId] = useState("");
@@ -105,7 +125,6 @@ export default function AllocatePage() {
     const [singleEnd, setSingleEnd] = useState("");
     const [singleReason, setSingleReason] = useState("");
 
-    // Bulk dialog
     const [bulkOpen, setBulkOpen] = useState(false);
     const [bulkTutorId, setBulkTutorId] = useState("");
     const [bulkReason, setBulkReason] = useState("");
@@ -136,6 +155,30 @@ export default function AllocatePage() {
         }
         return m;
     }, [allocations]);
+
+    const selectedStudents = useMemo(() => {
+        return Array.from(selectedIds)
+            .map((id) => studentById.get(id))
+            .filter((x): x is User => Boolean(x));
+    }, [selectedIds, studentById]);
+
+    const calculatedBulkEndTime = useMemo(() => {
+        if (!bulkStartTime || !bulkSlotDurationMinutes || bulkSlotDurationMinutes <= 0) return "";
+        return addMinutesToTime(bulkStartTime, bulkSlotDurationMinutes);
+    }, [bulkStartTime, bulkSlotDurationMinutes]);
+
+    const totalPages = Math.max(1, Math.ceil(students.length / ITEMS_PER_PAGE));
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
+        }
+    }, [currentPage, totalPages]);
+
+    const paginatedStudents = useMemo(() => {
+        const start = (currentPage - 1) * ITEMS_PER_PAGE;
+        return students.slice(start, start + ITEMS_PER_PAGE);
+    }, [students, currentPage]);
 
     async function fetchData() {
         setLoading(true);
@@ -169,7 +212,7 @@ export default function AllocatePage() {
     }
 
     useEffect(() => {
-        fetchData();
+        void fetchData();
     }, []);
 
     function toggleSelect(id: string, checked: boolean) {
@@ -208,13 +251,16 @@ export default function AllocatePage() {
         return data;
     }
 
-    async function updateAllocation(id: string, payload: {
-        studentUserId?: string;
-        tutorUserId?: string;
-        reason?: string;
-        scheduleStart?: string;
-        scheduleEnd?: string;
-    }) {
+    async function updateAllocation(
+        id: string,
+        payload: {
+            studentUserId?: string;
+            tutorUserId?: string;
+            reason?: string;
+            scheduleStart?: string;
+            scheduleEnd?: string;
+        }
+    ) {
         const res = await fetch(`/api/staff/allocations/${id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -379,17 +425,22 @@ export default function AllocatePage() {
 
     return (
         <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <h1 className="text-xl font-semibold">Allocate / Reallocate Students</h1>
 
-                <div className="flex items-center gap-2">
-                    <Button onClick={() => setBulkOpen(true)} disabled={selectedIds.size === 0}>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                    <Button
+                        onClick={() => setBulkOpen(true)}
+                        disabled={selectedIds.size === 0}
+                        className="w-full sm:w-auto"
+                    >
                         Bulk Assign ({selectedIds.size})
                     </Button>
                     <Button
                         variant="secondary"
                         onClick={() => setSelectedIds(new Set())}
                         disabled={selectedIds.size === 0}
+                        className="w-full sm:w-auto"
                     >
                         Clear Selection
                     </Button>
@@ -398,73 +449,174 @@ export default function AllocatePage() {
 
             {error && <p className="text-sm text-red-600">{error}</p>}
 
-            <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
+            <Card className="shadow-sm">
+                <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <CardTitle className="text-base">Student List</CardTitle>
-                    <Badge variant="outline">Sprint 1</Badge>
+                    <Badge variant="outline" className="w-fit">
+                        {students.length} students
+                    </Badge>
                 </CardHeader>
 
-                <CardContent>
+                <CardContent className="space-y-4">
                     {loading ? (
                         <p className="text-sm text-muted-foreground">Loading...</p>
                     ) : (
-                        <div className="rounded-lg border bg-white overflow-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead className="w-[48px]">Sel</TableHead>
-                                        <TableHead className="w-[60px]">No</TableHead>
-                                        <TableHead>Student Name</TableHead>
-                                        <TableHead>Email</TableHead>
-                                        <TableHead>Tutor</TableHead>
-                                        <TableHead>Schedule</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead className="text-right">Action</TableHead>
-                                    </TableRow>
-                                </TableHeader>
+                        <>
+                            <div className="hidden overflow-auto rounded-lg border bg-white md:block">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead className="w-12">Sel</TableHead>
+                                            <TableHead className="w-15">No</TableHead>
+                                            <TableHead>Student Name</TableHead>
+                                            <TableHead>Email</TableHead>
+                                            <TableHead>Tutor</TableHead>
+                                            <TableHead>Schedule</TableHead>
+                                            <TableHead>Status</TableHead>
+                                            <TableHead className="text-right">Action</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
 
-                                <TableBody>
-                                    {students.map((s, idx) => {
+                                    <TableBody>
+                                        {paginatedStudents.map((s, idx) => {
+                                            const rowNumber = (currentPage - 1) * ITEMS_PER_PAGE + idx + 1;
+                                            const allocation = allocationByStudentId.get(s.id);
+                                            const assigned = Boolean(allocation);
+                                            const tutor = allocation ? tutorById.get(allocation.tutorUserId) : null;
+
+                                            return (
+                                                <TableRow key={s.id}>
+                                                    <TableCell>
+                                                        <Checkbox
+                                                            checked={selectedIds.has(s.id)}
+                                                            onCheckedChange={(v) => toggleSelect(s.id, Boolean(v))}
+                                                            aria-label={`Select ${fullName(s)}`}
+                                                        />
+                                                    </TableCell>
+
+                                                    <TableCell>{rowNumber}</TableCell>
+                                                    <TableCell className="font-medium">{fullName(s)}</TableCell>
+                                                    <TableCell>{s.email}</TableCell>
+                                                    <TableCell>{tutor ? fullName(tutor) : "-"}</TableCell>
+
+                                                    <TableCell className="text-xs text-muted-foreground">
+                                                        {allocation ? (
+                                                            <div className="space-y-1">
+                                                                <div>{allocation.scheduleStart}</div>
+                                                                <div>→ {allocation.scheduleEnd}</div>
+                                                            </div>
+                                                        ) : (
+                                                            "-"
+                                                        )}
+                                                    </TableCell>
+
+                                                    <TableCell>
+                                                        {assigned ? (
+                                                            <Badge variant="secondary">Assigned</Badge>
+                                                        ) : (
+                                                            <Badge variant="destructive">Unassigned</Badge>
+                                                        )}
+                                                    </TableCell>
+
+                                                    <TableCell className="space-x-2 text-right">
+                                                        <Button size="sm" onClick={() => openSingle(s.id)}>
+                                                            {assigned ? "Reassign" : "Assign"}
+                                                        </Button>
+
+                                                        {allocation && (
+                                                            <Button
+                                                                size="sm"
+                                                                variant="secondary"
+                                                                onClick={async () => {
+                                                                    setError(null);
+                                                                    try {
+                                                                        await undoAllocation(allocation.id);
+                                                                        toast.success("Allocation ended successfully.");
+                                                                        await fetchData();
+                                                                    } catch (e: any) {
+                                                                        const msg = e?.message ?? "Undo failed";
+                                                                        setError(msg);
+                                                                        toast.error(msg);
+                                                                    }
+                                                                }}
+                                                            >
+                                                                End
+                                                            </Button>
+                                                        )}
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
+
+                                        {paginatedStudents.length === 0 && (
+                                            <TableRow>
+                                                <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                                                    No students found.
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </div>
+
+                            <div className="grid gap-3 md:hidden">
+                                {paginatedStudents.length === 0 ? (
+                                    <div className="rounded-xl border bg-white p-6 text-center text-sm text-muted-foreground">
+                                        No students found.
+                                    </div>
+                                ) : (
+                                    paginatedStudents.map((s, idx) => {
+                                        const rowNumber = (currentPage - 1) * ITEMS_PER_PAGE + idx + 1;
                                         const allocation = allocationByStudentId.get(s.id);
                                         const assigned = Boolean(allocation);
                                         const tutor = allocation ? tutorById.get(allocation.tutorUserId) : null;
 
                                         return (
-                                            <TableRow key={s.id}>
-                                                <TableCell>
+                                            <div key={s.id} className="rounded-xl border bg-white p-4 shadow-sm">
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <div className="text-xs text-muted-foreground">#{rowNumber}</div>
+                                                        <div className="truncate font-medium">{fullName(s)}</div>
+                                                        <div className="truncate text-sm text-muted-foreground">{s.email}</div>
+                                                    </div>
+
                                                     <Checkbox
                                                         checked={selectedIds.has(s.id)}
                                                         onCheckedChange={(v) => toggleSelect(s.id, Boolean(v))}
                                                         aria-label={`Select ${fullName(s)}`}
                                                     />
-                                                </TableCell>
+                                                </div>
 
-                                                <TableCell>{idx + 1}</TableCell>
-                                                <TableCell className="font-medium">{fullName(s)}</TableCell>
-                                                <TableCell>{s.email}</TableCell>
-                                                <TableCell>{tutor ? fullName(tutor) : "-"}</TableCell>
+                                                <div className="mt-3 grid gap-2 text-sm">
+                                                    <div>
+                                                        <span className="text-muted-foreground">Tutor: </span>
+                                                        <span>{tutor ? fullName(tutor) : "-"}</span>
+                                                    </div>
 
-                                                <TableCell className="text-xs text-muted-foreground">
-                                                    {allocation ? (
-                                                        <div className="space-y-1">
-                                                            <div>{allocation.scheduleStart}</div>
-                                                            <div>→ {allocation.scheduleEnd}</div>
-                                                        </div>
-                                                    ) : (
-                                                        "-"
-                                                    )}
-                                                </TableCell>
+                                                    <div>
+                                                        <span className="text-muted-foreground">Schedule: </span>
+                                                        <span className="text-xs">
+                              {allocation
+                                  ? formatScheduleRange(allocation.scheduleStart, allocation.scheduleEnd)
+                                  : "-"}
+                            </span>
+                                                    </div>
 
-                                                <TableCell>
-                                                    {assigned ? (
-                                                        <Badge variant="secondary">Assigned</Badge>
-                                                    ) : (
-                                                        <Badge variant="destructive">Unassigned</Badge>
-                                                    )}
-                                                </TableCell>
+                                                    <div>
+                                                        {assigned ? (
+                                                            <Badge variant="secondary">Assigned</Badge>
+                                                        ) : (
+                                                            <Badge variant="destructive">Unassigned</Badge>
+                                                        )}
+                                                    </div>
+                                                </div>
 
-                                                <TableCell className="text-right space-x-2">
-                                                    <Button size="sm" onClick={() => openSingle(s.id)}>
+                                                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                                                    <Button
+                                                        size="sm"
+                                                        onClick={() => openSingle(s.id)}
+                                                        className="w-full sm:w-auto"
+                                                    >
                                                         {assigned ? "Reassign" : "Assign"}
                                                     </Button>
 
@@ -472,6 +624,7 @@ export default function AllocatePage() {
                                                         <Button
                                                             size="sm"
                                                             variant="secondary"
+                                                            className="w-full sm:w-auto"
                                                             onClick={async () => {
                                                                 setError(null);
                                                                 try {
@@ -488,24 +641,52 @@ export default function AllocatePage() {
                                                             End
                                                         </Button>
                                                     )}
-                                                </TableCell>
-                                            </TableRow>
+                                                </div>
+                                            </div>
                                         );
-                                    })}
-                                </TableBody>
-                            </Table>
-                        </div>
+                                    })
+                                )}
+                            </div>
+
+                            {!loading && students.length > 0 && (
+                                <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="text-sm text-muted-foreground">
+                                        Page {currentPage} of {totalPages}
+                                    </div>
+
+                                    <div className="flex gap-2">
+                                        <Button
+                                            variant="secondary"
+                                            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                                            disabled={currentPage === 1}
+                                            className="w-full sm:w-auto"
+                                        >
+                                            Previous
+                                        </Button>
+
+                                        <Button
+                                            variant="secondary"
+                                            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                                            disabled={currentPage === totalPages}
+                                            className="w-full sm:w-auto"
+                                        >
+                                            Next
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </>
                     )}
                 </CardContent>
             </Card>
 
             <Dialog open={singleOpen} onOpenChange={setSingleOpen}>
-                <DialogContent>
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
                     <DialogHeader>
                         <DialogTitle>Assign / Reassign Student</DialogTitle>
                     </DialogHeader>
 
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                         <div className="text-sm text-muted-foreground">
                             Student:{" "}
                             <span className="font-medium text-foreground">
@@ -531,7 +712,7 @@ export default function AllocatePage() {
                             </Select>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                             <div className="space-y-2">
                                 <div className="text-sm font-medium">Schedule Start</div>
                                 <Input
@@ -565,11 +746,17 @@ export default function AllocatePage() {
                         </p>
                     </div>
 
-                    <DialogFooter className="gap-2">
-                        <Button variant="secondary" onClick={() => setSingleOpen(false)}>
+                    <DialogFooter className="flex-col gap-2 sm:flex-row">
+                        <Button
+                            variant="secondary"
+                            onClick={() => setSingleOpen(false)}
+                            className="w-full sm:w-auto"
+                        >
                             Cancel
                         </Button>
-                        <Button onClick={onSingleConfirm}>Confirm</Button>
+                        <Button onClick={onSingleConfirm} className="w-full sm:w-auto">
+                            Confirm
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -581,14 +768,25 @@ export default function AllocatePage() {
                     if (!open) setPreviewItems([]);
                 }}
             >
-                <DialogContent className="max-w-3xl">
+                <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
                     <DialogHeader>
                         <DialogTitle>Bulk Assign Students (Preview → Confirm)</DialogTitle>
                     </DialogHeader>
 
-                    <div className="space-y-3">
-                        <div className="text-sm">
-                            Selected students: <span className="font-semibold">{selectedIds.size}</span>
+                    <div className="space-y-4">
+                        <div className="rounded-lg border bg-slate-50 p-3 text-sm">
+                            <div>
+                                Selected students: <span className="font-semibold">{selectedIds.size}</span>
+                            </div>
+                            {selectedStudents.length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                    {selectedStudents.map((student) => (
+                                        <Badge key={student.id} variant="secondary">
+                                            {fullName(student)}
+                                        </Badge>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         <div className="space-y-2">
@@ -613,7 +811,7 @@ export default function AllocatePage() {
                             </Select>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                             <div className="space-y-2">
                                 <div className="text-sm font-medium">Date</div>
                                 <Input
@@ -639,6 +837,15 @@ export default function AllocatePage() {
                             </div>
 
                             <div className="space-y-2">
+                                <div className="text-sm font-medium">Calculated End Time</div>
+                                <Input
+                                    value={calculatedBulkEndTime || "Auto generated"}
+                                    disabled
+                                    placeholder="Auto generated"
+                                />
+                            </div>
+
+                            <div className="space-y-2">
                                 <div className="text-sm font-medium">Slot Duration (minutes)</div>
                                 <Input
                                     type="number"
@@ -652,7 +859,7 @@ export default function AllocatePage() {
                                 />
                             </div>
 
-                            <div className="space-y-2">
+                            <div className="space-y-2 sm:col-span-2 lg:col-span-2">
                                 <div className="text-sm font-medium">Time Zone</div>
                                 <Input
                                     value={bulkTimeZoneId}
@@ -661,8 +868,16 @@ export default function AllocatePage() {
                                         setPreviewItems([]);
                                     }}
                                 />
-                                <div className="text-xs text-muted-foreground">Example: Asia/Yangon</div>
+                                <div className="text-xs text-muted-foreground">
+                                    Example: Asia/Yangon
+                                </div>
                             </div>
+                        </div>
+
+                        <div className="rounded-md border bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                            Bulk preview does not take a manual end date/end time. The backend calculates
+                            each student&apos;s <span className="font-medium">scheduleEnd</span> from the selected
+                            date, start time, and slot duration.
                         </div>
 
                         <div className="space-y-2">
@@ -678,10 +893,10 @@ export default function AllocatePage() {
                         </div>
 
                         {previewItems.length > 0 && (
-                            <>
+                            <div className="space-y-3">
                                 <div className="text-sm font-medium">Preview Result</div>
 
-                                <div className="rounded-lg border bg-white overflow-auto max-h-[260px]">
+                                <div className="hidden overflow-auto rounded-lg border bg-white md:block">
                                     <Table>
                                         <TableHeader>
                                             <TableRow>
@@ -721,20 +936,61 @@ export default function AllocatePage() {
                                         </TableBody>
                                     </Table>
                                 </div>
-                            </>
+
+                                <div className="grid gap-3 md:hidden">
+                                    {previewItems.map((p, idx) => {
+                                        const student = studentById.get(p.studentUserId);
+
+                                        return (
+                                            <div key={idx} className="rounded-xl border bg-white p-4 shadow-sm">
+                                                <div className="font-medium">
+                                                    {student ? fullName(student) : p.studentUserId}
+                                                </div>
+                                                {student?.email && (
+                                                    <div className="mt-1 text-sm text-muted-foreground">{student.email}</div>
+                                                )}
+
+                                                <div className="mt-3 space-y-2 text-sm">
+                                                    <div>
+                                                        <span className="text-muted-foreground">Start: </span>
+                                                        <span>{formatPreviewDateTime(p.scheduleStart)}</span>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-muted-foreground">End: </span>
+                                                        <span>{formatPreviewDateTime(p.scheduleEnd)}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
                         )}
                     </div>
 
-                    <DialogFooter className="gap-2">
-                        <Button variant="secondary" onClick={() => setBulkOpen(false)}>
+                    <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
+                        <Button
+                            variant="secondary"
+                            onClick={() => setBulkOpen(false)}
+                            className="w-full sm:w-auto"
+                        >
                             Cancel
                         </Button>
 
-                        <Button variant="secondary" onClick={onBulkPreview} disabled={previewLoading}>
+                        <Button
+                            variant="secondary"
+                            onClick={onBulkPreview}
+                            disabled={previewLoading}
+                            className="w-full sm:w-auto"
+                        >
                             {previewLoading ? "Previewing..." : "Preview Slots"}
                         </Button>
 
-                        <Button onClick={onBulkConfirmFromPreview} disabled={!previewItems.length}>
+                        <Button
+                            onClick={onBulkConfirmFromPreview}
+                            disabled={!previewItems.length}
+                            className="w-full sm:w-auto"
+                        >
                             Confirm Bulk Allocate
                         </Button>
                     </DialogFooter>

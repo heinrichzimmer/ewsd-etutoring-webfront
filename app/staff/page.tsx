@@ -79,7 +79,9 @@ export default function StaffDashboardPage() {
                         fetch("/api/staff/tutors", { cache: "no-store" }),
                         fetch("/api/staff/students", { cache: "no-store" }),
                         fetch("/api/staff/reports/messaging-summary?windowDays=7", { cache: "no-store" }),
-                        fetch("/api/staff/reports/students-without-tutor?page=0&size=5", { cache: "no-store" }),
+                        fetch("/api/staff/reports/students-without-tutor?page=0&size=5", {
+                            cache: "no-store",
+                        }),
                     ]);
 
                 const adminData = await adminRes.json().catch(() => ({}));
@@ -91,8 +93,12 @@ export default function StaffDashboardPage() {
                 if (!adminRes.ok) throw new Error(adminData?.message ?? "Failed to load admin profile");
                 if (!tutorsRes.ok) throw new Error(tutorsData?.message ?? "Failed to load tutors");
                 if (!studentsRes.ok) throw new Error(studentsData?.message ?? "Failed to load students");
-                if (!messagingRes.ok) throw new Error(messagingData?.message ?? "Failed to load messaging summary");
-                if (!withoutTutorRes.ok) throw new Error(withoutTutorData?.message ?? "Failed to load students without tutor");
+                if (!messagingRes.ok) {
+                    throw new Error(messagingData?.message ?? "Failed to load messaging summary");
+                }
+                if (!withoutTutorRes.ok) {
+                    throw new Error(withoutTutorData?.message ?? "Failed to load students without tutor");
+                }
 
                 const tutorList = Array.isArray(tutorsData) ? tutorsData : tutorsData?.content ?? [];
                 const studentList = Array.isArray(studentsData) ? studentsData : studentsData?.content ?? [];
@@ -143,22 +149,22 @@ export default function StaffDashboardPage() {
 
     return (
         <div className="space-y-6">
-            <div className="flex flex-wrap items-center gap-3">
-                <Button asChild className="gap-2">
+            <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+                <Button asChild className="w-full justify-start gap-2 sm:w-auto">
                     <Link href="/staff/tutors">
                         <GraduationCap className="h-4 w-4" />
                         Tutors
                     </Link>
                 </Button>
 
-                <Button asChild variant="secondary" className="gap-2">
+                <Button asChild variant="secondary" className="w-full justify-start gap-2 sm:w-auto">
                     <Link href="/staff/students">
                         <Users className="h-4 w-4" />
                         Students
                     </Link>
                 </Button>
 
-                <Button asChild variant="secondary" className="gap-2">
+                <Button asChild variant="secondary" className="w-full justify-start gap-2 sm:w-auto">
                     <Link href="/staff/allocate">
                         <UserRound className="h-4 w-4" />
                         Allocate / Reallocate
@@ -177,9 +183,11 @@ export default function StaffDashboardPage() {
 
             <div className="grid gap-4 md:grid-cols-3">
                 <Card className="shadow-sm">
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-sm font-medium">Messages in Last 7 Days</CardTitle>
-                        <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                    <CardHeader className="flex flex-row items-start justify-between gap-3 pb-2">
+                        <CardTitle className="text-sm font-medium leading-5">
+                            Messages in Last 7 Days
+                        </CardTitle>
+                        <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-3xl font-bold">{loading ? "..." : messagesLast7Days}</div>
@@ -190,9 +198,11 @@ export default function StaffDashboardPage() {
                 </Card>
 
                 <Card className="shadow-sm">
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-sm font-medium">Average Messages per Tutor</CardTitle>
-                        <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                    <CardHeader className="flex flex-row items-start justify-between gap-3 pb-2">
+                        <CardTitle className="text-sm font-medium leading-5">
+                            Average Messages per Tutor
+                        </CardTitle>
+                        <BarChart3 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-3xl font-bold">{loading ? "..." : averageMessagesPerTutor}</div>
@@ -203,9 +213,11 @@ export default function StaffDashboardPage() {
                 </Card>
 
                 <Card className="shadow-sm">
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-sm font-medium">Students Without Personal Tutor</CardTitle>
-                        <UserX className="h-4 w-4 text-muted-foreground" />
+                    <CardHeader className="flex flex-row items-start justify-between gap-3 pb-2">
+                        <CardTitle className="text-sm font-medium leading-5">
+                            Students Without Personal Tutor
+                        </CardTitle>
+                        <UserX className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-3xl font-bold">{loading ? "..." : studentsWithoutTutorCount}</div>
@@ -218,17 +230,19 @@ export default function StaffDashboardPage() {
 
             <div className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
                 <Card className="shadow-sm">
-                    <CardHeader className="flex flex-row items-center justify-between">
+                    <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <CardTitle className="text-base">Students Without Tutor</CardTitle>
-                        <Badge variant="outline">{studentsWithoutTutorCount}</Badge>
+                        <Badge variant="outline" className="w-fit">
+                            {studentsWithoutTutorCount}
+                        </Badge>
                     </CardHeader>
 
                     <CardContent>
-                        <div className="rounded-lg border bg-white overflow-auto">
+                        <div className="hidden overflow-auto rounded-lg border bg-white md:block">
                             <table className="w-full text-sm">
                                 <thead className="bg-slate-50">
                                 <tr className="border-b">
-                                    <th className="px-3 py-2 text-left w-15">No</th>
+                                    <th className="w-15 px-3 py-2 text-left">No</th>
                                     <th className="px-3 py-2 text-left">Name</th>
                                     <th className="px-3 py-2 text-left">Username</th>
                                     <th className="px-3 py-2 text-left">Email</th>
@@ -267,6 +281,47 @@ export default function StaffDashboardPage() {
                                 </tbody>
                             </table>
                         </div>
+
+                        <div className="grid gap-3 md:hidden">
+                            {loading ? (
+                                <div className="rounded-xl border bg-white p-6 text-center text-sm text-muted-foreground">
+                                    Loading...
+                                </div>
+                            ) : studentsWithoutTutor.length === 0 ? (
+                                <div className="rounded-xl border bg-white p-6 text-center text-sm text-muted-foreground">
+                                    All visible students already have tutors.
+                                </div>
+                            ) : (
+                                studentsWithoutTutor.map((student, idx) => (
+                                    <div key={student.id} className="rounded-xl border bg-white p-4 shadow-sm">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <div className="text-xs text-muted-foreground">#{idx + 1}</div>
+                                                <div className="truncate font-medium">{fullName(student)}</div>
+                                                <div className="truncate text-sm text-muted-foreground">
+                                                    {student.email ?? "-"}
+                                                </div>
+                                            </div>
+
+                                            <Badge variant="outline">Unallocated</Badge>
+                                        </div>
+
+                                        <div className="mt-3 space-y-2 text-sm">
+                                            <div>
+                                                <span className="text-muted-foreground">Username: </span>
+                                                <span>{student.username ?? "-"}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-4">
+                                            <Button asChild size="sm" variant="secondary" className="w-full sm:w-auto">
+                                                <Link href="/staff/allocate">Allocate</Link>
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
                     </CardContent>
                 </Card>
 
@@ -283,12 +338,14 @@ export default function StaffDashboardPage() {
 
                         <div className="rounded-lg border bg-slate-50 p-4">
                             <div className="text-sm text-muted-foreground">Students</div>
-                            <div className="mt-1 text-2xl font-semibold">{loading ? "..." : students.length}</div>
+                            <div className="mt-1 text-2xl font-semibold">
+                                {loading ? "..." : students.length}
+                            </div>
                         </div>
 
                         <div className="rounded-lg border bg-slate-50 p-4">
                             <div className="text-sm text-muted-foreground">Admin Last Login</div>
-                            <div className="mt-1 text-sm font-medium">
+                            <div className="mt-1 text-sm font-medium break-words">
                                 {loading ? "..." : formatDate(adminUser?.lastLoginDate)}
                             </div>
                         </div>

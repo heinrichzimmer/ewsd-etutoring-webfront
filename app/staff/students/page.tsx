@@ -7,7 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-
 import {
     Table,
     TableBody,
@@ -24,6 +23,8 @@ type User = {
     lastName?: string;
     email: string;
     role?: string;
+    isActive?: boolean;
+    isLocked?: boolean;
 };
 
 function fullName(u: User) {
@@ -42,7 +43,7 @@ export default function StudentListPage() {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch("/api/staff/students");
+            const res = await fetch("/api/staff/students", { cache: "no-store" });
             const data = await res.json().catch(() => ({}));
 
             if (!res.ok) throw new Error(data?.message ?? "Failed to load students");
@@ -57,12 +58,13 @@ export default function StudentListPage() {
     }
 
     useEffect(() => {
-        load();
+        void load();
     }, []);
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         if (!q) return students;
+
         return students.filter((s) => {
             const text = `${fullName(s)} ${s.username ?? ""} ${s.email ?? ""}`.toLowerCase();
             return text.includes(q);
@@ -90,7 +92,7 @@ export default function StudentListPage() {
 
             {error && <p className="text-sm text-red-600">{error}</p>}
 
-            <Card>
+            <Card className="shadow-sm">
                 <CardHeader>
                     <CardTitle className="text-base">Students</CardTitle>
                 </CardHeader>
@@ -103,10 +105,11 @@ export default function StudentListPage() {
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead className="w-[60px]">No</TableHead>
+                                        <TableHead className="w-15">No</TableHead>
                                         <TableHead>Name</TableHead>
                                         <TableHead>Username</TableHead>
                                         <TableHead>Email</TableHead>
+                                        <TableHead>Status</TableHead>
                                         <TableHead className="text-right">Action</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -118,9 +121,18 @@ export default function StudentListPage() {
                                             <TableCell className="font-medium">{fullName(s)}</TableCell>
                                             <TableCell>{s.username ?? "-"}</TableCell>
                                             <TableCell>{s.email}</TableCell>
+                                            <TableCell>
+                                                {s.isLocked ? (
+                                                    <Badge variant="destructive">Locked</Badge>
+                                                ) : s.isActive === false ? (
+                                                    <Badge variant="secondary">Inactive</Badge>
+                                                ) : (
+                                                    <Badge>Active</Badge>
+                                                )}
+                                            </TableCell>
                                             <TableCell className="text-right">
-                                                <Button size="sm" variant="secondary" onClick={() => alert(`Student: ${fullName(s)}`)}>
-                                                    View
+                                                <Button asChild size="sm" variant="secondary">
+                                                    <Link href={`/staff/users/${s.id}`}>View</Link>
                                                 </Button>
                                             </TableCell>
                                         </TableRow>
@@ -128,7 +140,7 @@ export default function StudentListPage() {
 
                                     {filtered.length === 0 && (
                                         <TableRow>
-                                            <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                                            <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                                                 No students found.
                                             </TableCell>
                                         </TableRow>

@@ -30,7 +30,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
     const pathname = usePathname();
     const router = useRouter();
 
-    const [search, setSearch] = useState("");
+
     const [mobileOpen, setMobileOpen] = useState(false);
 
     useEffect(() => {
@@ -38,8 +38,8 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
     }, [pathname]);
 
     const currentLabel = useMemo(() => {
-        const current = navItems.find(
-            (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
+        const current = navItems.find((item) =>
+            isActivePath(pathname, item.href, "/staff")
         );
         return current?.label ?? "Staff Dashboard";
     }, [pathname]);
@@ -48,6 +48,11 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
         await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
         router.push("/login");
         router.refresh();
+    }
+
+    function isActivePath(pathname: string, href: string, rootHref: string) {
+        if (href === rootHref) return pathname === rootHref;
+        return pathname === href || pathname.startsWith(`${href}/`);
     }
 
     const sidebarContent = (
@@ -86,7 +91,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
 
             <nav className="space-y-1">
                 {navItems.map((item) => {
-                    const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                    const active = isActivePath(pathname, item.href, "/staff");
                     const Icon = item.icon;
 
                     return (
@@ -161,23 +166,9 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
                                     {currentLabel}
                                 </div>
                             </div>
-
-                            <div className="hidden w-full max-w-md md:block">
-                                <Input
-                                    placeholder="Search..."
-                                    value={search}
-                                    onChange={(e) => setSearch(e.target.value)}
-                                />
-                            </div>
                         </div>
 
-                        <div className="px-4 pb-3 sm:px-6 md:hidden">
-                            <Input
-                                placeholder="Search..."
-                                value={search}
-                                onChange={(e) => setSearch(e.target.value)}
-                            />
-                        </div>
+
                     </header>
 
                     <main className="min-w-0 p-4 sm:p-6">{children}</main>

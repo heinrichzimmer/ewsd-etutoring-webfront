@@ -40,8 +40,8 @@ export default function TutorLayout({ children }: { children: React.ReactNode })
     }, [pathname]);
 
     const currentLabel = useMemo(() => {
-        const current = navItems.find(
-            (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
+        const current = navItems.find((item) =>
+            isActivePath(pathname, item.href, "/tutor")
         );
         return current?.label ?? "Tutor Dashboard";
     }, [pathname]);
@@ -50,6 +50,11 @@ export default function TutorLayout({ children }: { children: React.ReactNode })
         await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
         router.push("/login");
         router.refresh();
+    }
+
+    function isActivePath(pathname: string, href: string, rootHref: string) {
+        if (href === rootHref) return pathname === rootHref;
+        return pathname === href || pathname.startsWith(`${href}/`);
     }
 
     const sidebarContent = (
@@ -88,7 +93,7 @@ export default function TutorLayout({ children }: { children: React.ReactNode })
 
             <nav className="space-y-1">
                 {navItems.map((item) => {
-                    const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                    const active = isActivePath(pathname, item.href, "/tutor");
                     const Icon = item.icon;
 
                     return (

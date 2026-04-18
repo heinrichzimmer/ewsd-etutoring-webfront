@@ -40,13 +40,19 @@ type Blog = {
     createdAt?: string | null;
 };
 
+type MessageActivity = {
+    createdAt?: string | null;
+    preview?: string | null;
+};
+
 type Conversation = {
     id: string;
     tutorUserId?: string;
     lastMessageAt?: string | null;
+    lastMessagePreview?: string | null;
 };
 
-function fullName(user?: Me | null) {
+function fullName(user?: Me | UserLite | null) {
     if (!user) return "Unknown";
     return `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || user.username || user.email || "Unknown";
 }
@@ -181,7 +187,78 @@ function normalizeConversation(raw: unknown): Conversation | null {
                 : typeof obj.updatedAt === "string"
                     ? obj.updatedAt
                     : null,
+        lastMessagePreview:
+            typeof obj.lastMessagePreview === "string"
+                ? obj.lastMessagePreview
+                : typeof obj.lastMessage === "string"
+                    ? obj.lastMessage
+                    : null,
     };
+}
+
+function normalizeMessageActivity(raw: unknown): MessageActivity | null {
+    if (!raw || typeof raw !== "object") return null;
+
+    const obj = raw as Record<string, unknown>;
+    return {
+        createdAt:
+            typeof obj.createdAt === "string"
+                ? obj.createdAt
+                : typeof obj.createdDate === "string"
+                    ? obj.createdDate
+                    : typeof obj.updatedAt === "string"
+                        ? obj.updatedAt
+                        : null,
+        preview:
+            typeof obj.body === "string"
+                ? obj.body
+                : typeof obj.content === "string"
+                    ? obj.content
+                    : typeof obj.message === "string"
+                        ? obj.message
+                        : null,
+    };
+}
+
+async function enrichConversationsWithLatestMessage(
+    conversations: Conversation[]
+): Promise<Conversation[]> {
+    return Promise.all(
+        conversations.map(async (conversation) => {
+            if (conversation.lastMessageAt && conversation.lastMessagePreview) {
+                return conversation;
+            }
+
+            try {
+                const res = await fetch(`/api/conversations/${conversation.id}/messages?page=0&size=20`, {
+                    cache: "no-store",
+                });
+
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) return conversation;
+
+                const rawMessages: unknown[] = Array.isArray(data) ? data : data?.content ?? [];
+                const latest = rawMessages
+                    .map(normalizeMessageActivity)
+                    .filter((x): x is MessageActivity => x !== null)
+                    .sort((a, b) => {
+                        const aTime = parseDate(a.createdAt)?.getTime() ?? 0;
+                        const bTime = parseDate(b.createdAt)?.getTime() ?? 0;
+                        return bTime - aTime;
+                    })[0];
+
+                if (!latest) return conversation;
+
+                return {
+                    ...conversation,
+                    lastMessageAt: conversation.lastMessageAt ?? latest.createdAt ?? null,
+                    lastMessagePreview: conversation.lastMessagePreview ?? latest.preview ?? null,
+                };
+            } catch {
+                return conversation;
+            }
+        })
+    );
 }
 
 export default function StudentDashboardPage() {
@@ -231,7 +308,15 @@ export default function StudentDashboardPage() {
 
             if (convRes.ok) {
                 const raw: unknown[] = Array.isArray(convData) ? convData : convData?.content ?? [];
-                setConversations(raw.map(normalizeConversation).filter((x): x is Conversation => x !== null));
+                const baseConversations = raw
+                    .map(normalizeConversation)
+                    .filter((x): x is Conversation => x !== null);
+
+                const hydratedConversations = await enrichConversationsWithLatestMessage(
+                    baseConversations
+                );
+
+                setConversations(hydratedConversations);
             }
 
             setLoading(false);
@@ -471,10 +556,15 @@ export default function StudentDashboardPage() {
                                     return (
                                         <div key={conversation.id} className="rounded-lg border bg-slate-50 p-3">
                                             <div className="font-medium">{tutorItem ? fullName(tutorItem) : "My Tutor"}</div>
+                                            <div className="mt-1 text-sm">
+                                                {conversation.lastMessagePreview
+                                                    ? truncate(conversation.lastMessagePreview, 72)
+                                                    : "Conversation available"}
+                                            </div>
                                             <div className="text-xs text-muted-foreground">
                                                 {conversation.lastMessageAt
                                                     ? `Last activity: ${formatDate(conversation.lastMessageAt)}`
-                                                    : "No activity yet"}
+                                                    : "No timestamp available"}
                                             </div>
                                         </div>
                                     );

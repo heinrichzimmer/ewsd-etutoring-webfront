@@ -37,7 +37,7 @@ function fullName(u?: Partial<User>) {
 function getNumber(obj: Record<string, unknown>, keys: string[]) {
     for (const key of keys) {
         const value = obj[key];
-        if (typeof value === "number") return value;
+        if (typeof value === "number" && Number.isFinite(value)) return value;
     }
     return 0;
 }
@@ -55,6 +55,10 @@ function formatDate(value?: string | null) {
         });
     }
     return value;
+}
+
+function formatMetric(value: number) {
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 export default function StaffDashboardPage() {
@@ -78,7 +82,9 @@ export default function StaffDashboardPage() {
                         fetch("/api/staff/admin-user", { cache: "no-store" }),
                         fetch("/api/staff/tutors", { cache: "no-store" }),
                         fetch("/api/staff/students", { cache: "no-store" }),
-                        fetch("/api/staff/reports/messaging-summary?windowDays=7", { cache: "no-store" }),
+                        fetch("/api/staff/reports/messaging-summary?windowDays=7", {
+                            cache: "no-store",
+                        }),
                         fetch("/api/staff/reports/students-without-tutor?page=0&size=5", {
                             cache: "no-store",
                         }),
@@ -90,18 +96,28 @@ export default function StaffDashboardPage() {
                 const messagingData = await messagingRes.json().catch(() => ({}));
                 const withoutTutorData = await withoutTutorRes.json().catch(() => ({}));
 
-                if (!adminRes.ok) throw new Error(adminData?.message ?? "Failed to load admin profile");
-                if (!tutorsRes.ok) throw new Error(tutorsData?.message ?? "Failed to load tutors");
-                if (!studentsRes.ok) throw new Error(studentsData?.message ?? "Failed to load students");
+                if (!adminRes.ok) {
+                    throw new Error(adminData?.message ?? "Failed to load admin profile");
+                }
+                if (!tutorsRes.ok) {
+                    throw new Error(tutorsData?.message ?? "Failed to load tutors");
+                }
+                if (!studentsRes.ok) {
+                    throw new Error(studentsData?.message ?? "Failed to load students");
+                }
                 if (!messagingRes.ok) {
                     throw new Error(messagingData?.message ?? "Failed to load messaging summary");
                 }
                 if (!withoutTutorRes.ok) {
-                    throw new Error(withoutTutorData?.message ?? "Failed to load students without tutor");
+                    throw new Error(
+                        withoutTutorData?.message ?? "Failed to load students without tutor"
+                    );
                 }
 
                 const tutorList = Array.isArray(tutorsData) ? tutorsData : tutorsData?.content ?? [];
-                const studentList = Array.isArray(studentsData) ? studentsData : studentsData?.content ?? [];
+                const studentList = Array.isArray(studentsData)
+                    ? studentsData
+                    : studentsData?.content ?? [];
                 const withoutTutorList = Array.isArray(withoutTutorData)
                     ? withoutTutorData
                     : withoutTutorData?.content ?? [];
@@ -114,25 +130,32 @@ export default function StaffDashboardPage() {
                 setStudents(studentList);
                 setStudentsWithoutTutor(withoutTutorList);
 
-                setMessagesLast7Days(
-                    getNumber(messagingObj, [
-                        "messagesLast7Days",
-                        "messageCountLast7Days",
-                        "totalMessagesLast7Days",
-                        "totalMessages",
-                        "messageCount",
-                        "messagesInWindow",
-                        "totalMessagesInWindow",
-                    ])
-                );
+                const totalMessages = getNumber(messagingObj, [
+                    "messagesLast7Days",
+                    "messageCountLast7Days",
+                    "totalMessagesLast7Days",
+                    "totalMessages",
+                    "messageCount",
+                    "messagesInWindow",
+                    "totalMessagesInWindow",
+                ]);
 
-                setAverageMessagesPerTutor(
-                    getNumber(messagingObj, [
-                        "averageMessagesPerTutor",
-                        "avgMessagesPerTutor",
-                        "averagePerTutor",
-                    ])
-                );
+                const averageFromApi = getNumber(messagingObj, [
+                    "averageMessagesPerTutor",
+                    "avgMessagesPerTutor",
+                    "averagePerTutor",
+                    "averageMessagesPerTutorLast7Days",
+                    "averageMessagesPerTutorInLast7Days",
+                    "avgMessagesPerTutorLast7Days",
+                    "avgMessagesPerTutorInLast7Days",
+                    "averageMessagesPerTutorInWindow",
+                ]);
+
+                const fallbackAverage =
+                    tutorList.length > 0 ? Number((totalMessages / tutorList.length).toFixed(1)) : 0;
+
+                setMessagesLast7Days(totalMessages);
+                setAverageMessagesPerTutor(averageFromApi > 0 ? averageFromApi : fallbackAverage);
             } catch (error) {
                 toast.error(error instanceof Error ? error.message : "Failed to load dashboard");
             } finally {
@@ -205,7 +228,9 @@ export default function StaffDashboardPage() {
                         <BarChart3 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-bold">{loading ? "..." : averageMessagesPerTutor}</div>
+                        <div className="text-3xl font-bold">
+                            {loading ? "..." : formatMetric(averageMessagesPerTutor)}
+                        </div>
                         <p className="mt-1 text-xs text-muted-foreground">
                             Average messaging activity for each tutor.
                         </p>
@@ -345,7 +370,7 @@ export default function StaffDashboardPage() {
 
                         <div className="rounded-lg border bg-slate-50 p-4">
                             <div className="text-sm text-muted-foreground">Admin Last Login</div>
-                            <div className="mt-1 text-sm font-medium break-words">
+                            <div className="mt-1 text-sm font-medium wrap-break-word">
                                 {loading ? "..." : formatDate(adminUser?.lastLoginDate)}
                             </div>
                         </div>

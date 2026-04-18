@@ -11,7 +11,7 @@ import {
     BookOpen,
     CalendarDays,
     MessageSquare,
-    Upload,
+    Scroll,
     LogOut,
     ArrowLeft,
     UserCircle2,
@@ -25,7 +25,7 @@ const navItems = [
     { href: "/student/blogs", label: "Blogs", icon: BookOpen },
     { href: "/student/meetings", label: "Schedule Meeting", icon: CalendarDays },
     { href: "/student/messages", label: "Messages", icon: MessageSquare },
-    { href: "/student/files", label: "Uploaded Files", icon: Upload },
+    { href: "/student/files", label: "Assignment", icon: Scroll },
 ];
 
 export default function StudentLayout({ children }: { children: React.ReactNode }) {

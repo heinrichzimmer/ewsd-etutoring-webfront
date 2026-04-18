@@ -11,7 +11,7 @@ import {
     Users,
     BookOpen,
     CalendarDays,
-    Upload,
+    Scroll,
     LogOut,
     ArrowLeft,
     UserCircle2,
@@ -25,8 +25,8 @@ const navItems = [
     { href: "/tutor/students", label: "Assigned Students", icon: Users },
     { href: "/tutor/blogs", label: "Blogs", icon: BookOpen },
     { href: "/tutor/meetings", label: "Schedule Meeting", icon: CalendarDays },
-    { href: "/tutor/files", label: "Uploaded Files", icon: Upload },
     { href: "/tutor/messages", label: "Messages", icon: MessageSquare },
+    { href: "/tutor/files", label: "Assignment", icon: Scroll },
 ];
 
 export default function TutorLayout({ children }: { children: React.ReactNode }) {
